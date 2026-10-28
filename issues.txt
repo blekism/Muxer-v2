@@ -1,0 +1,38 @@
+preview and output appearance not matching
+planned solution is to use the min max value from spike and normalize those values in css so that it appears as -x to x
+
+going to check now is what value is being passed to ffmpeg to see where the issue lies
+
+these are the ffmpeg values being passed
+
+render values passed to ffmpeg are:  {
+  temperature: {
+    value: 100,
+    kelvin: 8500,
+    mix: 0.5,
+    opacity: 0.6,
+    color: 'rgb(255 150 50)'
+  },
+  tint: {
+    value: -100,
+    strength: 1,
+    opacity: 0.45,
+    color: 'rgb(0 200 90)',
+    balance: { rs: -1, gs: 0.5, bs: 1 }
+  },
+  vignette: { value: 0, alpha: 0 },
+  text: {
+    fontSize: 86,
+    outlineWidth: 12,
+    xExpr: 'w*0.06',
+    yExpr: 'h-text_h-h*0.06',
+    cssXPercent: '6%',
+    cssYPercent: '94%',
+    cssXTransform: 'translate(0, -50%)',
+    cssYTransform: 'translateY(-100%)'
+  }
+}
+
+normalization could be the better option here rather than using shared math model since that is not accurate enough
+idea of normalization here is making the value shown in css as the one it accepts e.g. for temp -100 to 100
+but internally, what will be passed to ffmpeg is 4800 to 6400 

@@ -48,22 +48,30 @@ export interface VideoControl {
 }
 
 export const VIDEO_CONTROLS: readonly VideoControl[] = [
-  { key: 'zoom', label: 'Zoom', min: 100, max: 150, step: 1, unit: '%', randomRange: [100, 115] },
+  {
+    key: 'zoom',
+    label: 'Zoom',
+    min: 1.18,
+    max: 1.06,
+    step: 0.3,
+    unit: '%',
+    randomRange: [100, 115]
+  },
   {
     key: 'rotation',
     label: 'Rotation',
-    min: -15,
-    max: 15,
-    step: 0.5,
+    min: -1,
+    max: 1,
+    step: 0.1,
     unit: '°',
     randomRange: [-3, 3]
   },
   {
     key: 'perspective',
     label: 'Perspective',
-    min: -30,
-    max: 30,
-    step: 1,
+    min: -0.005,
+    max: 0.005,
+    step: 0.001,
     unit: '',
     randomRange: [-8, 8]
   },
@@ -79,12 +87,13 @@ export const VIDEO_CONTROLS: readonly VideoControl[] = [
   {
     key: 'temperature',
     label: 'Color temperature',
-    min: -100,
-    max: 100,
+    min: 4200,
+    max: 6800,
     step: 1,
     unit: '',
     randomRange: [-20, 20]
   },
+
   { key: 'tint', label: 'Tint', min: -100, max: 100, step: 1, unit: '', randomRange: [-15, 15] },
   { key: 'vignette', label: 'Vignette', min: 0, max: 100, step: 1, unit: '%', randomRange: [0, 40] }
 ]
