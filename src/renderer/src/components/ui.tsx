@@ -195,17 +195,20 @@ interface SliderProps {
   max: number
   step: number
   unit?: string
+  format?: (value: number) => string
   onChange: (value: number) => void
 }
 
-export function Slider({ label, value, min, max, step, unit = '', onChange }: SliderProps) {
+export function Slider({ label, value, min, max, step, unit = '', format, onChange }: SliderProps) {
   const id = useId()
   const percent = ((value - min) / (max - min)) * 100
   return (
     <div className="slider">
       <div className="slider__row">
         <label htmlFor={id}>{label}</label>
-        <output htmlFor={id}>{`${Number(value.toFixed(2))}${unit}`}</output>
+        <output htmlFor={id}>
+          {format ? format(value) : `${Number(value.toFixed(2))}${unit}`}
+        </output>
       </div>
       <input
         id={id}

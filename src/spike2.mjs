@@ -97,8 +97,8 @@ async function edit(input, flashImages, outFile) {
   const vignetteAngle = rand(0.1, 0.2)
 
   const rotation = rand(-1.0, 1.0) // degrees
-  const perspectiveX = rand(-0.005, 0.005)
-  const perspectiveY = rand(-0.005, 0.005)
+  const perspectiveX = rand(-1, 1)
+  const perspectiveY = rand(-1, 1)
 
   // Each image appears for 3 frames.
   const flashFrames = 3

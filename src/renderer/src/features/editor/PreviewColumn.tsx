@@ -2,6 +2,13 @@ import { useEffect, useRef, useState, type CSSProperties } from 'react'
 import { EmptyState, Icon } from '../../components/ui'
 import type { HorizontalAlign, SourceEditSettings, SourceVideo, VerticalAlign } from '../../types'
 import { fontStack } from './config'
+import {
+  PERSPECTIVE_CSS_DISTANCE,
+  perspectiveToRotateXDeg,
+  temperatureOverlayColor,
+  tintToStrength,
+  vignetteGradient
+} from './previewMath'
 
 const REFERENCE_WIDTH = 1080 // export width the font size and outline are expressed in
 const FLEX_ALIGN: Record<VerticalAlign | HorizontalAlign, CSSProperties['alignItems']> = {
@@ -47,20 +54,25 @@ export function PreviewColumn({ source, caption, settings }: PreviewColumnProps)
   }
 
   const videoStyle: CSSProperties = {
-    transform: `perspective(900px) rotateY(${video.perspective}deg) rotate(${video.rotation}deg) scale(${video.zoom / 100})`
+    // Same order as the FFmpeg chain: zoom, then rotate, then perspective.
+    transform: `perspective(${PERSPECTIVE_CSS_DISTANCE}) rotateX(${perspectiveToRotateXDeg(video.perspective)}deg) rotate(${video.rotation}deg) scale(${video.zoom})`
   }
 
+  // video.temperature is Kelvin (what FFmpeg gets). FFmpeg multiplies the picture by the black-body color,
+  // so the overlay multiplies too instead of tinting on top.
   const temperatureStyle: CSSProperties = {
-    background: video.temperature >= 0 ? 'rgb(255 150 50)' : 'rgb(60 140 255)',
-    opacity: (Math.abs(video.temperature) / 100) * 0.4
+    background: temperatureOverlayColor(video.temperature),
+    mixBlendMode: 'multiply'
   }
+  // video.tint is FFmpeg's colorbalance green lift: positive = greener, negative = magenta.
+  const tint = tintToStrength(video.tint)
   const tintStyle: CSSProperties = {
-    background: video.tint >= 0 ? 'rgb(255 0 170)' : 'rgb(0 200 90)',
-    opacity: (Math.abs(video.tint) / 100) * 0.35
+    background: tint >= 0 ? 'rgb(0 200 90)' : 'rgb(255 0 170)',
+    // At the spike's +-0.025, FFmpeg only lifts deep shadows by about 3 of 255 levels, so keep this faint.
+    opacity: Math.abs(tint) * 0.03
   }
-  const vignetteStyle: CSSProperties = {
-    background: `radial-gradient(ellipse at center, transparent 55%, rgb(0 0 0 / ${(video.vignette / 100) * 0.85}) 100%)`
-  }
+  // video.vignette is FFmpeg's lens angle in radians; the gradient reproduces the filter's falloff.
+  const vignetteStyle: CSSProperties = { background: vignetteGradient(video.vignette) }
 
   // Sizes use container query units so the caption scales with the preview frame.
   const toCqw = (px: number) => `${(px / REFERENCE_WIDTH) * 100}cqw`

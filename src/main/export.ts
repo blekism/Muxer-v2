@@ -15,6 +15,7 @@ const FLASH_FRAMES = 3
 const FLASH_IMAGE_COUNT = 5
 const IMAGE_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.webp', '.gif'])
 const OUTPUT_WIDTHS = { low: 480, medium: 720, high: 1080 } as const
+const NEUTRAL_TEMPERATURE_K = 6500 // FFmpeg's colortemperature default: no shift
 const OUTPUT_CRFS = { low: 28, medium: 23, high: 18 } as const
 const PROBE_TIMEOUT_MS = 60_000
 const EXPORT_TIMEOUT_MS = 30 * 60_000
@@ -99,9 +100,10 @@ function outputDimensions(width: number): { width: number; height: number } {
   return { width, height: height % 2 === 0 ? height : height + 1 }
 }
 
+/** value is the fraction of the width cut from each side of one edge (same unit as the UI slider). */
 function perspectiveFilter(value: number, width: number, height: number): string | null {
   if (value === 0) return null
-  const skew = (Math.abs(value) / 100) * width * 0.18
+  const skew = Math.abs(value) * width
   const topLeft = value > 0 ? skew : 0
   const topRight = value > 0 ? width - skew : width
   const bottomLeft = value > 0 ? 0 : skew
@@ -121,26 +123,28 @@ function buildFilters(
   const remainingDuration = Math.max(0, source.durationSec - trimStart)
   const totalFrames = Math.floor(remainingDuration * source.fps)
   const starts = randomFlashStarts(totalFrames, images.length)
-  const zoom = Math.max(1, settings.video.zoom / 100)
+  const zoom = Math.max(1, settings.video.zoom)
   const portraitAspect = 9 / 16
   const textScale = output.width / 1080
   const fontSize = Math.max(1, Math.round(settings.text.size * textScale))
   const outlineWidth = Math.max(0, Math.round(settings.text.outline * textScale))
   const filters = [
-    `[0:v]setpts=PTS-STARTPTS,crop=min(iw\\,ih*${portraitAspect})/${zoom}:min(ih\\,iw/${portraitAspect})/${zoom}:(iw-ow)/2:(ih-oh)/2,rotate=${settings.video.rotation}*PI/180:fillcolor=black,scale=${output.width}:${output.height}`
+    // Rotate the full frame first and crop afterwards. Rotating the already-cropped frame leaves black wedges
+    // in its corners; the preview never shows them because the zoomed video fills the frame.
+    `[0:v]setpts=PTS-STARTPTS,rotate=${settings.video.rotation}*PI/180:fillcolor=black,crop=min(iw\\,ih*${portraitAspect})/${zoom}:min(ih\\,iw/${portraitAspect})/${zoom}:(iw-ow)/2:(ih-oh)/2,scale=${output.width}:${output.height}`
   ]
 
   const perspective = perspectiveFilter(settings.video.perspective, output.width, output.height)
   if (perspective) filters[0] += `,${perspective}`
-  if (settings.video.temperature !== 0) {
-    const temperature = Math.max(1000, Math.min(40000, 6500 + settings.video.temperature * 20))
+  if (settings.video.temperature !== NEUTRAL_TEMPERATURE_K) {
+    // The UI value is already Kelvin, so it goes to FFmpeg unchanged.
+    const temperature = Math.max(1000, Math.min(40000, settings.video.temperature))
     filters[0] += `,colortemperature=temperature=${temperature}:mix=0.5`
   }
-  if (settings.video.tint !== 0) {
-    const tint = settings.video.tint / 100
-    filters[0] += `,colorbalance=rs=${tint}:gs=${-tint / 2}:bs=${-tint}`
-  }
-  if (settings.video.vignette > 0) filters[0] += ',vignette=angle=PI/4'
+  // Tint is the green lift (gs) in the same +-0.025 range spike2.mjs uses; positive = greener.
+  if (settings.video.tint !== 0) filters[0] += `,colorbalance=gs=${settings.video.tint}`
+  // Vignette is the lens angle in radians; larger = stronger, 0 = off.
+  if (settings.video.vignette > 0) filters[0] += `,vignette=angle=${settings.video.vignette}`
   filters[0] += ',format=yuv420p[base]'
 
   for (let index = 0; index < images.length; index += 1) {

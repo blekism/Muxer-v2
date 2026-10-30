@@ -5,14 +5,8 @@ import { EditorPage } from './features/editor/EditorPage'
 import { useEditorSettings } from './features/editor/useEditorSettings'
 import { LibraryPage } from './features/library/LibraryPage'
 import { MOCK_DOWNLOADS } from './mock'
-import type {
-  CaptionPreset,
-  DownloadItem,
-  ExportProgress,
-  MusicTrack,
-  PhotoFolder,
-  SourceVideo
-} from './types'
+import type { CaptionPreset, DownloadItem, MusicTrack, PhotoFolder, SourceVideo } from './types'
+import { ExportProgress } from 'src/shared/types'
 
 type PageId = 'editor' | 'downloader' | 'library'
 

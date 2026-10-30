@@ -140,6 +140,7 @@ export function SettingsColumn({
             max={control.max}
             step={control.step}
             unit={control.unit}
+            format={control.format}
             onChange={(value) => sourceId && actions.setVideoProp(sourceId, control.key, value)}
           />
         ))}
