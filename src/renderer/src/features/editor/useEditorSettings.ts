@@ -21,7 +21,10 @@ type Action =
 
 function randomInRange([min, max]: readonly [number, number], step: number): number {
   const raw = min + Math.random() * (max - min)
-  return Number((Math.round(raw / step) * step).toFixed(2))
+  // Keep as many decimals as the step has (a fixed 2 turned tint's +-0.025 into 0.03, outside its range).
+  const decimals = (String(step).split('.')[1] ?? '').length
+  const snapped = Math.min(max, Math.max(min, Math.round(raw / step) * step))
+  return Number(snapped.toFixed(decimals))
 }
 
 function randomVideoProps(): VideoProps {

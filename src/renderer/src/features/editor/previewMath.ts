@@ -1,4 +1,4 @@
-import { PERSPECTIVE_MAX, TEMPERATURE_MIX, TINT_MAX } from './config'
+import { PERSPECTIVE_MAX, TEMPERATURE_KELVIN, TEMPERATURE_MIX, TINT_MAX } from './config'
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value))
 
@@ -7,8 +7,8 @@ const clamp = (value: number, min: number, max: number) => Math.min(max, Math.ma
  * (normalized so the brightest channel is 1), then blends the result with the original by `mix`:
  *   out = in * ((1 - mix) + mix * blackBody(K))
  * Measured against FFmpeg 7: 4200K at mix 0.5 turns mid-gray (128) into (128, 116, 107). Red is untouched,
- * green and blue are dimmed. A CSS overlay with `mix-blend-mode: multiply` does the same multiplication,
- * so the preview uses this instead of a signed warm/cool strength.
+ * green and blue are dimmed (lower Kelvin = warmer). The preview does the same per-channel multiplication with
+ * an SVG feColorMatrix.
  * The formula is the common black-body fit and matches FFmpeg to within 0.004 for 4200K to 6800K.
  */
 function kelvinToMultiplier(kelvin: number): [number, number, number] {
@@ -26,17 +26,34 @@ function kelvinToMultiplier(kelvin: number): [number, number, number] {
   ]
 }
 
-/** CSS color for a full-frame overlay with `mix-blend-mode: multiply`. */
-export function temperatureOverlayColor(kelvin: number): string {
-  const channels = kelvinToMultiplier(kelvin).map((multiplier) =>
-    Math.round((1 - TEMPERATURE_MIX + TEMPERATURE_MIX * multiplier) * 255)
+const IDENTITY_MATRIX = '1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 1 0'
+
+/**
+ * SVG feColorMatrix that applies colortemperature: each channel times (1 - mix) + mix * blackBody(K).
+ * export.ts skips the filter at the neutral 6500K, so the preview uses the identity matrix there too.
+ */
+export function temperatureMatrix(kelvin: number): string {
+  if (kelvin === TEMPERATURE_KELVIN.neutral) return IDENTITY_MATRIX
+  const [red, green, blue] = kelvinToMultiplier(kelvin).map(
+    (multiplier) => 1 - TEMPERATURE_MIX + TEMPERATURE_MIX * multiplier
   )
-  return `rgb(${channels.join(' ')})`
+  return `${red} 0 0 0 0  0 ${green} 0 0 0  0 0 ${blue} 0 0  0 0 0 1 0`
 }
 
-/** Native tint is FFmpeg's colorbalance green lift. Returns -1 (full magenta) to +1 (full green). */
-export function tintToStrength(value: number): number {
-  return clamp(value / TINT_MAX, -1, 1)
+/**
+ * FFmpeg's colorbalance (4.4+) adds to green: v += gs * clip((0.333 - l) * 4 + 0.5, 0, 1) * 0.7,
+ * where l = max(r,g,b) + min(r,g,b) (not halved). The lift is therefore only on dark pixels: full when
+ * l < 0.208 (gray below ~26/255), fading to zero at l = 0.458 (gray ~58/255). Midtones and highlights are untouched.
+ *
+ * The preview filter needs (1 - weight) in green, so it can add without disturbing alpha (see PreviewColumn).
+ * With l ~ 2 * luma, 1 - weight = clip(8 * luma - 0.832).
+ */
+const SHADOW_LUMA = [0.2126, 0.7152, 0.0722].map((coefficient) => coefficient * 8)
+export const TINT_INVERSE_WEIGHT_MATRIX = `0 0 0 0 1  ${SHADOW_LUMA.join(' ')} 0 -0.832  0 0 0 0 1  0 0 0 0 1`
+
+/** Amount added to green at full shadow weight: FFmpeg's gs times its 0.7 scale. Negative = magenta. */
+export function tintLift(gs: number): number {
+  return clamp(gs, -TINT_MAX, TINT_MAX) * 0.7
 }
 
 /**

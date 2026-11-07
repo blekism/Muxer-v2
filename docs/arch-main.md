@@ -26,7 +26,8 @@ Owns everything that needs Node/OS access: windows, file dialogs, FFmpeg, and pe
   - Each source is probed again with ffprobe (fps, duration, audio track).
   - `buildFilters` produces one `-filter_complex` graph, in this order:
     1. Rotate the full frame, then crop to 9:16 divided by zoom, then scale to the quality width (480/720/1080) at 16:9 portrait height.
-    2. Perspective, `colortemperature` (skipped at 6500K, `mix=0.5`), `colorbalance gs=` (tint), `vignette angle=`.
+    2. Perspective, then an explicit YUV→`gbrp` conversion using the source's probed matrix and range (untagged = BT.709 limited). Then `colortemperature` (skipped at 6500K, `mix=TEMPERATURE_MIX`), `colorbalance gs=` (tint, which lifts shadows only), and `vignette angle=`. Then convert back to BT.709 limited `yuv420p`. The output is tagged BT.709 (`-colorspace`/`-color_primaries`/`-color_trc`/`-color_range`) so players decode it the way the Chromium preview does. HDR sources (PQ/HLG) only log a warning and are not tone-mapped.
+    - The shared color constants come from `src/shared/colorConstants.ts`, the same file the renderer uses.
     3. Up to 5 images from the photo folder, each overlaid for 3 frames at a random start frame.
     4. `drawtext` caption, read from a temp file in `%TEMP%` that is deleted afterwards.
   - Encodes with libx264, using a CRF set by quality.

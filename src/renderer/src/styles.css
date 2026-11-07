@@ -738,8 +738,10 @@ select.input {
   inset: 0;
   pointer-events: none;
 }
-.preview__overlay--blend {
-  mix-blend-mode: overlay;
+.preview__filters {
+  position: absolute;
+  width: 0;
+  height: 0;
 }
 .preview__play {
   position: absolute;
