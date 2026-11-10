@@ -2,7 +2,15 @@ import { useId } from 'react'
 import { Button, EmptyState, Panel, RadioList, Segmented, Slider } from '../../components/ui'
 import { formatDuration } from '../../lib/format'
 import type { HorizontalAlign, MusicTrack, VerticalAlign } from '../../types'
-import { FONT_OPTIONS, QUALITY_OPTIONS, TEXT_SWATCHES, VIDEO_CONTROLS, fontStack } from './config'
+import {
+  FONT_OPTIONS,
+  QUALITY_OPTIONS,
+  TEXT_SWATCHES,
+  VIDEO_CONTROLS,
+  fontStack,
+  fromDisplay,
+  toDisplay
+} from './config'
 import type { EditorApi } from './useEditorSettings'
 
 const VERTICAL_OPTIONS: readonly { value: VerticalAlign; label: string }[] = [
@@ -135,13 +143,15 @@ export function SettingsColumn({
           <Slider
             key={control.key}
             label={control.label}
-            value={video[control.key]}
-            min={control.min}
-            max={control.max}
-            step={control.step}
+            value={toDisplay(control, video[control.key])}
+            min={control.display?.min ?? control.min}
+            max={control.display?.max ?? control.max}
+            step={control.display ? 1 : control.step}
             unit={control.unit}
             format={control.format}
-            onChange={(value) => sourceId && actions.setVideoProp(sourceId, control.key, value)}
+            onChange={(value) =>
+              sourceId && actions.setVideoProp(sourceId, control.key, fromDisplay(control, value))
+            }
           />
         ))}
       </Panel>

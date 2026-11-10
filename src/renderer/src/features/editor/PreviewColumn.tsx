@@ -1,15 +1,17 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react'
 import { EmptyState, Icon } from '../../components/ui'
 import type { HorizontalAlign, SourceEditSettings, SourceVideo, VerticalAlign } from '../../types'
-import { fontStack } from './config'
+import { TEMPERATURE_KELVIN, fontStack } from './config'
 import {
   PERSPECTIVE_CSS_DISTANCE,
+  TINT_INVERSE_WEIGHT_MATRIX,
   perspectiveToRotateXDeg,
-  temperatureOverlayColor,
-  tintToStrength,
+  temperatureMatrix,
+  tintLift,
   vignetteGradient
 } from './previewMath'
 
+const COLOR_FILTER_ID = 'preview-color-filter'
 const REFERENCE_WIDTH = 1080 // export width the font size and outline are expressed in
 const FLEX_ALIGN: Record<VerticalAlign | HorizontalAlign, CSSProperties['alignItems']> = {
   top: 'flex-start',
@@ -53,23 +55,13 @@ export function PreviewColumn({ source, caption, settings }: PreviewColumnProps)
     }
   }
 
+  // Temperature (Kelvin) and tint (colorbalance gs) are applied by one SVG filter, in FFmpeg's order.
+  const lift = tintLift(video.tint)
+  const hasColorFilter = video.temperature !== TEMPERATURE_KELVIN.neutral || lift !== 0
   const videoStyle: CSSProperties = {
     // Same order as the FFmpeg chain: zoom, then rotate, then perspective.
-    transform: `perspective(${PERSPECTIVE_CSS_DISTANCE}) rotateX(${perspectiveToRotateXDeg(video.perspective)}deg) rotate(${video.rotation}deg) scale(${video.zoom})`
-  }
-
-  // video.temperature is Kelvin (what FFmpeg gets). FFmpeg multiplies the picture by the black-body color,
-  // so the overlay multiplies too instead of tinting on top.
-  const temperatureStyle: CSSProperties = {
-    background: temperatureOverlayColor(video.temperature),
-    mixBlendMode: 'multiply'
-  }
-  // video.tint is FFmpeg's colorbalance green lift: positive = greener, negative = magenta.
-  const tint = tintToStrength(video.tint)
-  const tintStyle: CSSProperties = {
-    background: tint >= 0 ? 'rgb(0 200 90)' : 'rgb(255 0 170)',
-    // At the spike's +-0.025, FFmpeg only lifts deep shadows by about 3 of 255 levels, so keep this faint.
-    opacity: Math.abs(tint) * 0.03
+    transform: `perspective(${PERSPECTIVE_CSS_DISTANCE}) rotateX(${perspectiveToRotateXDeg(video.perspective)}deg) rotate(${video.rotation}deg) scale(${video.zoom})`,
+    filter: hasColorFilter ? `url(#${COLOR_FILTER_ID})` : undefined
   }
   // video.vignette is FFmpeg's lens angle in radians; the gradient reproduces the filter's falloff.
   const vignetteStyle: CSSProperties = { background: vignetteGradient(video.vignette) }
@@ -137,8 +129,33 @@ export function PreviewColumn({ source, caption, settings }: PreviewColumnProps)
                   }}
                 />
               )}
-              <div className="preview__overlay preview__overlay--blend" style={temperatureStyle} />
-              <div className="preview__overlay preview__overlay--blend" style={tintStyle} />
+              <svg className="preview__filters" aria-hidden="true">
+                {/* sRGB, not the linearRGB default: FFmpeg works on gamma-encoded 8-bit RGB. */}
+                <filter id={COLOR_FILTER_ID} colorInterpolationFilters="sRGB">
+                  <feColorMatrix
+                    in="SourceGraphic"
+                    type="matrix"
+                    values={temperatureMatrix(video.temperature)}
+                    result="warmed"
+                  />
+                  <feColorMatrix
+                    in="warmed"
+                    type="matrix"
+                    values={TINT_INVERSE_WEIGHT_MATRIX}
+                    result="inverseWeight"
+                  />
+                  {/* warmed + lift * (1 - inverseWeight): green += lift * weight; R, B and alpha unchanged. */}
+                  <feComposite
+                    in="warmed"
+                    in2="inverseWeight"
+                    operator="arithmetic"
+                    k1={0}
+                    k2={1}
+                    k3={-lift}
+                    k4={lift}
+                  />
+                </filter>
+              </svg>
               <div className="preview__overlay" style={vignetteStyle} />
               {previewError ? (
                 <div className="preview__media-error" role="alert">

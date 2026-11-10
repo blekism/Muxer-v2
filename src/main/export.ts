@@ -8,6 +8,7 @@ import type {
   ExportResult,
   SourceEditSettings
 } from '../shared/types'
+import { TEMPERATURE_KELVIN, TEMPERATURE_MIX } from '../shared/colorConstants'
 import { ffmpegPath, ffprobePath } from './utils/ffpaths'
 
 const runFile = promisify(execFile)
@@ -15,7 +16,6 @@ const FLASH_FRAMES = 3
 const FLASH_IMAGE_COUNT = 5
 const IMAGE_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.webp', '.gif'])
 const OUTPUT_WIDTHS = { low: 480, medium: 720, high: 1080 } as const
-const NEUTRAL_TEMPERATURE_K = 6500 // FFmpeg's colortemperature default: no shift
 const OUTPUT_CRFS = { low: 28, medium: 23, high: 18 } as const
 const PROBE_TIMEOUT_MS = 60_000
 const EXPORT_TIMEOUT_MS = 30 * 60_000
@@ -26,6 +26,11 @@ interface ProbeResult {
   fps: number
   durationSec: number
   hasAudio: boolean
+  /** swscale matrix name for the source's YUV, e.g. bt709. */
+  colorMatrix: string
+  /** 'tv' (limited) or 'pc' (full). */
+  colorRange: 'tv' | 'pc'
+  colorTransfer: string | undefined
 }
 
 interface ProbeJson {
@@ -34,9 +39,40 @@ interface ProbeJson {
     width?: number
     height?: number
     r_frame_rate?: string
+    color_space?: string
+    color_range?: string
+    color_transfer?: string
   }>
   format?: { duration?: string }
 }
+
+/** ffprobe color_space -> swscale in_color_matrix name. */
+const SWSCALE_MATRICES: Record<string, string> = {
+  bt709: 'bt709',
+  smpte170m: 'smpte170m',
+  bt470bg: 'bt470',
+  fcc: 'fcc',
+  smpte240m: 'smpte240m',
+  bt2020nc: 'bt2020',
+  bt2020c: 'bt2020'
+}
+const HDR_TRANSFERS = new Set(['smpte2084', 'arib-std-b67'])
+
+/**
+ * Color filters work in RGB, so FFmpeg converts YUV->RGB->YUV around them. Left to defaults, swscale uses BT.601
+ * for untagged input and the output carries no tags, while Chromium (the preview) assumes BT.709. Both conversions
+ * are explicit and the output is tagged BT.709 limited, so the export is decoded the same way the preview is.
+ */
+const OUTPUT_COLOR_ARGS = [
+  '-colorspace',
+  'bt709',
+  '-color_primaries',
+  'bt709',
+  '-color_trc',
+  'bt709',
+  '-color_range',
+  'tv'
+]
 
 function escapeFilterValue(value: string): string {
   return value.replace(/\\/g, '\\\\').replace(/:/g, '\\:').replace(/'/g, "\\'")
@@ -81,7 +117,11 @@ async function probeVideo(filePath: string, signal: AbortSignal): Promise<ProbeR
     height: video.height,
     fps,
     durationSec,
-    hasAudio: data.streams?.some((stream) => stream.codec_type === 'audio') ?? false
+    hasAudio: data.streams?.some((stream) => stream.codec_type === 'audio') ?? false,
+    // Untagged sources are treated as BT.709 limited, which is what Chromium assumes.
+    colorMatrix: SWSCALE_MATRICES[video.color_space ?? ''] ?? 'bt709',
+    colorRange: video.color_range === 'pc' ? 'pc' : 'tv',
+    colorTransfer: video.color_transfer
   }
 }
 
@@ -136,16 +176,18 @@ function buildFilters(
 
   const perspective = perspectiveFilter(settings.video.perspective, output.width, output.height)
   if (perspective) filters[0] += `,${perspective}`
-  if (settings.video.temperature !== NEUTRAL_TEMPERATURE_K) {
-    // The UI value is already Kelvin, so it goes to FFmpeg unchanged.
+  // Explicit YUV->RGB with the source's own matrix and range (see OUTPUT_COLOR_ARGS).
+  filters[0] += `,scale=in_color_matrix=${source.colorMatrix}:in_range=${source.colorRange},format=gbrp`
+  if (settings.video.temperature !== TEMPERATURE_KELVIN.neutral) {
+    // The stored value is already Kelvin, so it goes to FFmpeg unchanged.
     const temperature = Math.max(1000, Math.min(40000, settings.video.temperature))
-    filters[0] += `,colortemperature=temperature=${temperature}:mix=0.5`
+    filters[0] += `,colortemperature=temperature=${temperature}:mix=${TEMPERATURE_MIX}`
   }
-  // Tint is the green lift (gs) in the same +-0.025 range spike2.mjs uses; positive = greener.
+  // Tint is the shadow green lift (gs) in the same +-0.025 range spike2.mjs uses; positive = greener.
   if (settings.video.tint !== 0) filters[0] += `,colorbalance=gs=${settings.video.tint}`
   // Vignette is the lens angle in radians; larger = stronger, 0 = off.
   if (settings.video.vignette > 0) filters[0] += `,vignette=angle=${settings.video.vignette}`
-  filters[0] += ',format=yuv420p[base]'
+  filters[0] += ',scale=out_color_matrix=bt709:out_range=tv,format=yuv420p[base]'
 
   for (let index = 0; index < images.length; index += 1) {
     const inputIndex = index + 1
@@ -185,6 +227,11 @@ async function renderSource(
   signal: AbortSignal
 ): Promise<void> {
   const probe = await probeVideo(source.sourcePath, signal)
+  if (probe.colorTransfer && HDR_TRANSFERS.has(probe.colorTransfer)) {
+    console.warn(
+      `[export] ${source.name} is HDR (${probe.colorTransfer}). It is not tone-mapped, so its colors will not match the preview.`
+    )
+  }
   const durationSec = probe.durationSec - Math.max(0, settings.video.trimStart)
   if (durationSec <= 0) {
     throw new Error(`Trim start is beyond the duration of ${source.name}`)
@@ -225,7 +272,8 @@ async function renderSource(
     '-preset',
     'medium',
     '-pix_fmt',
-    'yuv420p'
+    'yuv420p',
+    ...OUTPUT_COLOR_ARGS
   )
 
   if (music) {

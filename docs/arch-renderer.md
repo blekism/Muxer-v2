@@ -19,8 +19,10 @@ Everything the user sees and interacts with. It has no Node or filesystem access
   - `PreviewColumn` — live CSS preview of the active source.
   - `SettingsColumn` — per-source text/caption, video and audio controls, and export quality.
   - `useEditorSettings.ts` — reducer holding `EditorSettings`. Settings are stored per source in `sourceSettings[sourceId]`. It exposes `EditorApi`.
-  - `config.ts` — `VIDEO_CONTROLS` (range, step, neutral value, randomize range), defaults, fonts, swatches and quality options. Values are **in FFmpeg units**, and the export uses them unchanged.
-  - `previewMath.ts` — converts FFmpeg units to CSS-preview values (Kelvin to an overlay color, tint, vignette gradient, perspective). This is the only place unit conversion for the preview happens.
+  - `config.ts` — `VIDEO_CONTROLS` (range, step, neutral value, randomize range, optional `display` scale), defaults, fonts, swatches and quality options. Values are **in FFmpeg units**, and the export uses them unchanged.
+    - Temperature, tint, and vignette have `display: 0–100`. `toDisplay`/`fromDisplay` map linearly between that scale and the FFmpeg range in `SettingsColumn`, so state still holds Kelvin / gs / radians. On the temperature slider, 0 = 4200K (warm) and 100 = 6800K, with neutral 6500K at about 88.
+  - `previewMath.ts` — converts FFmpeg units to CSS-preview values (a temperature `feColorMatrix`, the tint shadow-lift matrix, the vignette gradient, perspective). This is the only place unit conversion for the preview happens.
+  - `PreviewColumn` applies temperature and tint as one inline SVG filter on the `<video>`, in sRGB and in FFmpeg's order. Vignette is a gradient overlay on top.
   - `*old.ts(x)` (`configold`, `PreviewColumnold`, `SettingsColumnold`) — dead earlier versions that nothing imports.
 - **`features/downloader/DownloaderPage.tsx`** — TikTok link input (single or batch), a toolbar (output folder and Change), and the download history with progress, error text, and cancel, retry, show and remove actions. Every row and batch header has a checkbox, and there are no per-row trash buttons: deleting is one flow for one video or many. `History` keeps the selected ids. The panel toolbar has a single danger **Delete** button, disabled with 0 selected and labelled "Delete N video(s)" otherwise, which calls `onRemoveMany` with only the visible selected ids (a ticked batch counts all its links). A slim bar above the list has select-all, the count and Clear. The panel ends with a red, bottom-pinned note that deleting permanently deletes the video from the device. `groupHistory` folds batch items into one collapsible `BatchGroup` card per `batchId` (falling back to `createdAt` for older items). Groups start collapsed, and the card's aggregate progress and group actions loop over the per-item callbacks. It is props-driven, and `App` wires it to `window.api.downloads`.
 - **`features/library/LibraryPage.tsx`** — read-only grid of the imported videos with totals.
@@ -34,7 +36,7 @@ Everything the user sees and interacts with. It has no Node or filesystem access
 ## Rules and gotchas
 
 - The renderer never sees raw file paths for playback. `SourceVideo.previewUrl` is a `media://` URL minted by main.
-- **Units convention:** config and export share FFmpeg units, and only `previewMath.ts` converts for CSS. Constants that both sides depend on (for example `TEMPERATURE_MIX`) must be kept in sync with `src/main/export.ts` by hand.
+- **Units convention:** config and export share FFmpeg units, and only `previewMath.ts` converts for CSS. Color constants that both sides depend on (`TEMPERATURE_KELVIN`, `TEMPERATURE_MIX`, `TINT_MAX`, `VIGNETTE_MAX_ANGLE`) live in `src/shared/colorConstants.ts`, which both main and renderer import.
 - Per-source settings are keyed by source id. `App` reads them with `editor.getSourceSettings(id)` when it builds the export request.
 - Open problem: the preview does not match the exported output (see `issues.txt`).
 - Import style is mixed: `@renderer/types` alias, relative paths, and one `src/shared/types` import in `App.tsx`. The formatting also varies (semicolons in `lib/`, `main.tsx` and the downloader and library pages; none in `App.tsx` and the editor), so prefer the Prettier style when you touch a file.
