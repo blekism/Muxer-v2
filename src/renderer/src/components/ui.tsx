@@ -1,4 +1,10 @@
-import { useId, type ButtonHTMLAttributes, type CSSProperties, type ReactNode } from 'react'
+import {
+  useId,
+  type ButtonHTMLAttributes,
+  type CSSProperties,
+  type JSX,
+  type ReactNode
+} from 'react'
 
 export const cx = (...parts: (string | false | null | undefined)[]) =>
   parts.filter(Boolean).join(' ')
@@ -46,7 +52,10 @@ const ICON_PATHS = {
     'M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1',
     'M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1'
   ],
-  retry: ['M21 12a9 9 0 1 1-3-6.7L21 8', 'M21 3v5h-5']
+  retry: ['M21 12a9 9 0 1 1-3-6.7L21 8', 'M21 3v5h-5'],
+  close: ['M6 6l12 12', 'M18 6L6 18'],
+  chevron: ['M9 6l6 6-6 6'],
+  warning: ['M12 4l9 16H3z', 'M12 10v4', 'M12 17h.01']
 } as const
 
 export type IconName = keyof typeof ICON_PATHS
@@ -76,7 +85,7 @@ export function Icon({ name, size = 16 }: { name: IconName; size?: number }) {
 /* --------------------------------- Buttons -------------------------------- */
 
 interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
-  variant?: 'primary' | 'secondary' | 'ghost'
+  variant?: 'primary' | 'secondary' | 'ghost' | 'danger'
   size?: 'sm' | 'md' | 'lg'
   icon?: IconName
 }
@@ -119,6 +128,33 @@ export function IconButton({ icon, label, type = 'button', className, ...rest }:
     >
       <Icon name={icon} />
     </button>
+  )
+}
+
+export function Checkbox({
+  checked,
+  indeterminate = false,
+  label,
+  onChange
+}: {
+  checked: boolean
+  indeterminate?: boolean
+  /** Required: the box has no visible text. */
+  label: string
+  onChange: (checked: boolean) => void
+}): JSX.Element {
+  return (
+    <input
+      type="checkbox"
+      className="checkbox"
+      checked={checked}
+      aria-label={label}
+      title={label}
+      ref={(element) => {
+        if (element) element.indeterminate = indeterminate
+      }}
+      onChange={(event) => onChange(event.target.checked)}
+    />
   )
 }
 

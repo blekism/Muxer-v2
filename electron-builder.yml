@@ -15,6 +15,7 @@ extraResources:
     filter:
       - ffmpeg.exe
       - ffprobe.exe
+      - yt-dlp.exe
 asarUnpack:
   - resources/**
 win:

@@ -10,6 +10,7 @@ Everything the user sees and interacts with. It has no Node or filesystem access
   - Sidebar navigation between the `editor`, `downloader` and `library` pages. This is a `useState`, with no router.
   - `sources`, `photoFolder`, `presets`, `music`, `exportProgress`, `downloads`, and the editor settings from `useEditorSettings()`. State lives here so it survives page switches.
   - IPC orchestration: imports videos, music and the photo folder; loads the library on mount and auto-saves `{ presets, music }` on change; builds the `ExportRequest` and calls `export.run` and `export.cancel`; subscribes to `export.onProgress`.
+  - Downloads: loads `downloads.list()` and the folder on mount, and upserts items from `downloads.onUpdate`. Main owns the history; `downloads.start` doesn't return items, they arrive as update events. `onRemoveMany` calls `downloads.removeMany` and drops the items locally only if the user confirmed.
 
 ## Structure
 
@@ -21,13 +22,13 @@ Everything the user sees and interacts with. It has no Node or filesystem access
   - `config.ts` — `VIDEO_CONTROLS` (range, step, neutral value, randomize range), defaults, fonts, swatches and quality options. Values are **in FFmpeg units**, and the export uses them unchanged.
   - `previewMath.ts` — converts FFmpeg units to CSS-preview values (Kelvin to an overlay color, tint, vignette gradient, perspective). This is the only place unit conversion for the preview happens.
   - `*old.ts(x)` (`configold`, `PreviewColumnold`, `SettingsColumnold`) — dead earlier versions that nothing imports.
-- **`features/downloader/DownloaderPage.tsx`** — TikTok link input (single or batch) and a download history list. It currently runs on mock data. The IPC calls are TODOs.
+- **`features/downloader/DownloaderPage.tsx`** — TikTok link input (single or batch), a toolbar (output folder and Change), and the download history with progress, error text, and cancel, retry, show and remove actions. Every row and batch header has a checkbox, and there are no per-row trash buttons: deleting is one flow for one video or many. `History` keeps the selected ids. The panel toolbar has a single danger **Delete** button, disabled with 0 selected and labelled "Delete N video(s)" otherwise, which calls `onRemoveMany` with only the visible selected ids (a ticked batch counts all its links). A slim bar above the list has select-all, the count and Clear. The panel ends with a red, bottom-pinned note that deleting permanently deletes the video from the device. `groupHistory` folds batch items into one collapsible `BatchGroup` card per `batchId` (falling back to `createdAt` for older items). Groups start collapsed, and the card's aggregate progress and group actions loop over the per-item callbacks. It is props-driven, and `App` wires it to `window.api.downloads`.
 - **`features/library/LibraryPage.tsx`** — read-only grid of the imported videos with totals.
+- **`components/Navbar.tsx`**: `Navbar({ title, description })`, the top bar each page renders above its `.page` grid (inside a fragment).
 - **`components/ui.tsx`** — shared presentational primitives: `Icon` (inline SVG paths), `Button`, `IconButton`, `Panel`, `EmptyState`, `Thumb`, `Slider`, `Segmented`, `RadioList`, `cx`.
 - **`lib/`** — pure helpers. `format.ts` formats bytes, duration, resolution, relative time and plurals. `links.ts` validates and parses TikTok URLs.
-- **`types.ts`** — re-exports the shared types from `src/shared/types.ts` and adds renderer-only types (`EditorSettings`, `DownloadItem`, `DownloadStatus`, `DownloadMode`).
-- **`mock.ts`** — demo data for the downloader. Delete it once the downloader is wired to IPC.
-- **`styles.css`** — the active stylesheet. `assets/` holds `base.css`, `main.css` and the SVGs from the electron-vite template.
+- **`types.ts`** — re-exports the shared types from `src/shared/types.ts` (including `DownloadItem`, `DownloadStatus` and `DownloadMode`) and adds the renderer-only `EditorSettings`.
+- **`styles.css`** — the active stylesheet. Colors are `:root` tokens following 60-30-10: black surfaces (`--bg`, `--surface` for cards, `--chrome` for the navbar and sidebar), purple `--secondary`/`--surface-3`/borders, and a cyan `--accent`. `assets/` holds `base.css`, `main.css` and the SVGs from the electron-vite template.
 - **`env.d.ts`** — Vite client type references.
 
 ## Rules and gotchas
