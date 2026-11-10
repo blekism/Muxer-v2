@@ -1,4 +1,4 @@
-import { app, shell, BrowserWindow, dialog, ipcMain, protocol } from 'electron'
+import { app, shell, BrowserWindow, dialog, ipcMain, protocol, screen } from 'electron'
 import { execFile } from 'node:child_process'
 import { createReadStream } from 'node:fs'
 import { readFile, stat, writeFile } from 'node:fs/promises'
@@ -230,12 +230,14 @@ async function importVideos(): Promise<SourceVideo[]> {
 }
 
 function createWindow(): void {
-  // Create the browser window.
+  // Size from the work area (DIPs, excludes the taskbar) so the window and its minimums
+  // never exceed the usable screen on scaled displays.
+  const work = screen.getPrimaryDisplay().workAreaSize
   const mainWindow = new BrowserWindow({
-    width: 1000,
-    height: 700,
-    minWidth: 1100,
-    minHeight: 700,
+    width: Math.min(1280, work.width),
+    height: Math.min(800, work.height),
+    minWidth: Math.min(1100, work.width),
+    minHeight: Math.min(600, work.height),
     show: false,
     autoHideMenuBar: true,
     backgroundColor: '#000000',

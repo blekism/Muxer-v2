@@ -187,7 +187,9 @@ button {
   --sidebar-w: 200px;
   display: grid;
   grid-template-columns: var(--sidebar-w) minmax(0, 1fr);
-  height: 100%;
+  /* Fill only the space below the 32px titlebar (height: 100% overflowed by 32px). */
+  flex: 1;
+  min-height: 0;
   transition: grid-template-columns 0.2s ease;
 }
 .app--collapsed {
