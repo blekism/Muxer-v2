@@ -18,6 +18,9 @@ extraResources:
       - ffmpeg.exe
       - ffprobe.exe
       - yt-dlp.exe
+      - fonts/*.ttf
+asarUnpack:
+  - resources/**
 win:
   executableName: Reelszer
   icon: build/icon.ico

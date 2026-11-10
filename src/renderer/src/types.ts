@@ -16,6 +16,7 @@ export type {
   SavedEditorLibrary,
   SourceEditSettings,
   SourceVideo,
+  TextCase,
   TextStyle,
   VerticalAlign,
   VideoProps

@@ -3,16 +3,17 @@ import { Button, EmptyState, Panel, RadioList, Segmented, Slider } from '../../c
 import { formatDuration } from '../../lib/format'
 import type { HorizontalAlign, MusicTrack, VerticalAlign } from '../../types'
 import {
-  FONT_OPTIONS,
   MAX_COPIES,
   MIN_COPIES,
   QUALITY_OPTIONS,
+  TEXT_CASE_OPTIONS,
   TEXT_SWATCHES,
   VIDEO_CONTROLS,
-  fontStack,
+  fontStyle,
   fromDisplay,
   toDisplay
 } from './config'
+import { FONTS } from '../../../../shared/fonts'
 import { clampCopies } from '../../../../shared/exportConstants'
 import type { EditorApi } from './useEditorSettings'
 
@@ -48,30 +49,34 @@ export function SettingsColumn({
 }: SettingsColumnProps) {
   const { settings, actions } = editor
   const { text, video, audio } = editor.getSourceSettings(sourceId)
-  const fontId = useId()
   const locked = settings.fullRandomize
 
   return (
     <div className="editor__col editor__col--settings">
       <Panel title="Font">
-        <div className="field">
-          <label className="field-label" htmlFor={fontId}>
-            Typeface
-          </label>
-          <select
-            id={fontId}
-            className="input"
-            value={text.font}
-            style={{ fontFamily: fontStack(text.font) }}
-            onChange={(e) => sourceId && actions.patchText(sourceId, { font: e.target.value })}
-          >
-            {FONT_OPTIONS.map((font) => (
-              <option key={font} value={font}>
-                {font}
-              </option>
-            ))}
-          </select>
+        <div className="font-grid" role="radiogroup" aria-label="Typeface">
+          {FONTS.map((font) => (
+            <button
+              key={font.id}
+              type="button"
+              role="radio"
+              aria-checked={text.font === font.id}
+              className={`font-card${text.font === font.id ? ' font-card--selected' : ''}`}
+              onClick={() => sourceId && actions.patchText(sourceId, { font: font.id })}
+            >
+              <span className="font-card__sample" style={fontStyle(font.id)}>
+                Aa
+              </span>
+              <span className="font-card__name">{font.label}</span>
+            </button>
+          ))}
         </div>
+        <Segmented
+          legend="Case"
+          options={TEXT_CASE_OPTIONS}
+          value={text.textCase}
+          onChange={(textCase) => sourceId && actions.patchText(sourceId, { textCase })}
+        />
       </Panel>
 
       <Panel title="Text size and outline">

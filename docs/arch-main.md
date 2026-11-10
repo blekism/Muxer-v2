@@ -40,7 +40,7 @@ Owns everything that needs Node/OS access: windows, file dialogs, FFmpeg, and pe
   - Audio comes from the chosen music track (looped), else the original audio if enabled, else none.
   - `trimStart` is applied with `-ss`.
   - Cancellation and timeouts: the `AbortSignal` is passed to `execFile`, and each render has a 30-minute timeout.
-  - Settings values from the UI are passed to FFmpeg unchanged, apart from clamps.
+  - Settings values from the UI are passed to FFmpeg unchanged, apart from clamps. The caption text goes through `applyTextCase` (per-source `text.textCase`) before it is written to the drawtext file.
 - **`download.ts`** — TikTok downloads through the standalone `yt-dlp.exe`.
   - Binary: the bundled `resources/yt-dlp.exe` is copied to `userData/bin/yt-dlp.exe` (re-copied when the bundled one is newer), and only that copy runs, so `yt-dlp -U` works in a packaged app.
   - Each `downloads:start` call with mode `batch` stamps one shared `batchId` on its items, which the renderer uses to group them.
@@ -48,7 +48,7 @@ Owns everything that needs Node/OS access: windows, file dialogs, FFmpeg, and pe
   - Output: `<folder>/<uploader>_<id>.mp4` (batch items go in `<folder>/Batch <n> <YYYY-MM-DD>/`, where `n` comes from the persisted `nextBatch` counter in `downloads.json` and the date from the batch's `createdAt`), preferring H.264 (`-S vcodec:h264`) so the editor preview can play it, and merged with the bundled ffmpeg (`--ffmpeg-location`). Thumbnails go to `userData/download-thumbs/<id>.jpg` and are served as `media://` URLs.
   - Parsing: lines prefixed `__META__` (id and title), `__PROG__` (bytes), `__FILE__` (final path) and `ERROR:`, read from both stdout and stderr, because `--print` implies `--quiet`, which moves progress to stderr.
   - History and the output folder (default `Videos/TikTok Downloads`) persist in `userData/downloads.json`. File paths stay in main. Jobs that were active at shutdown load as failed (`Interrupted`).
-- **`utils/ffpaths.ts`** — resolves `ffmpeg.exe`, `ffprobe.exe` and the bundled `yt-dlp.exe`.
+- **`utils/ffpaths.ts`** — resolves `ffmpeg.exe`, `ffprobe.exe`, the bundled `yt-dlp.exe`, and `fontFilePath(id)` (the .ttf in `resources/fonts` that drawtext's `fontfile` uses; ids come from `src/shared/fonts.ts`).
   - Dev: `resources/`.
   - Packaged: `process.resourcesPath` (via `extraResources`).
   - Windows-only, because the `.exe` names are hardcoded.
