@@ -10,8 +10,8 @@ Owns everything that needs Node/OS access: windows, file dialogs, FFmpeg, and pe
   - **IPC handlers:**
     - `videos:import` — opens an MP4 picker, then runs `probeVideo` on each file.
     - `photos:choose-folder` — returns the folder's image list, sorted by name.
-    - `music:import` — opens an audio picker and ffprobes each file for its duration.
-    - `library:load` / `library:save` — reads and writes `userData/editor-library.json` (caption presets and music). `load` falls back to an empty library on any error.
+    - `music:import` — opens an audio picker and ffprobes each file for its duration. Each track gets a `previewUrl` (`media://` id) so the renderer can play it.
+    - `library:load` / `library:save` — reads and writes `userData/editor-library.json` (caption presets and music). `load` falls back to an empty library on any error and mints a fresh `previewUrl` for each music track; `save` strips `previewUrl` (ids are per session).
     - `export:run` — prompts for an output directory, then calls `exportVideos`. It rejects if an export is already running, returns `null` if the dialog is cancelled, and streams `export:progress` events to the sender.
     - `export:cancel` — aborts the active `AbortController`.
     - `downloads:list` / `start(urls, mode)` / `retry(id)` / `cancel(id)` / `show(id)` / `get-folder` / `choose-folder` — the TikTok downloader, implemented in `download.ts`. Item changes are pushed to all windows as `downloads:update` events carrying a full `DownloadItem`.
@@ -42,7 +42,7 @@ Owns everything that needs Node/OS access: windows, file dialogs, FFmpeg, and pe
   - Binary: the bundled `resources/yt-dlp.exe` is copied to `userData/bin/yt-dlp.exe` (re-copied when the bundled one is newer), and only that copy runs, so `yt-dlp -U` works in a packaged app.
   - Each `downloads:start` call with mode `batch` stamps one shared `batchId` on its items, which the renderer uses to group them.
   - Queue: one `spawn` per link, at most 2 at a time (`MAX_PARALLEL`). Cancelling kills the process tree with `taskkill /T /F`.
-  - Output: `<folder>/<uploader>_<id>.mp4`, preferring H.264 (`-S vcodec:h264`) so the editor preview can play it, and merged with the bundled ffmpeg (`--ffmpeg-location`). Thumbnails go to `userData/download-thumbs/<id>.jpg` and are served as `media://` URLs.
+  - Output: `<folder>/<uploader>_<id>.mp4` (batch items go in `<folder>/Batch <n> <YYYY-MM-DD>/`, where `n` comes from the persisted `nextBatch` counter in `downloads.json` and the date from the batch's `createdAt`), preferring H.264 (`-S vcodec:h264`) so the editor preview can play it, and merged with the bundled ffmpeg (`--ffmpeg-location`). Thumbnails go to `userData/download-thumbs/<id>.jpg` and are served as `media://` URLs.
   - Parsing: lines prefixed `__META__` (id and title), `__PROG__` (bytes), `__FILE__` (final path) and `ERROR:`, read from both stdout and stderr, because `--print` implies `--quiet`, which moves progress to stderr.
   - History and the output folder (default `Videos/TikTok Downloads`) persist in `userData/downloads.json`. File paths stay in main. Jobs that were active at shutdown load as failed (`Interrupted`).
 - **`utils/ffpaths.ts`** — resolves `ffmpeg.exe`, `ffprobe.exe` and the bundled `yt-dlp.exe`.

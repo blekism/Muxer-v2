@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Icon, type IconName } from './components/ui'
+import { BrandMark, Icon, type IconName } from './components/ui'
 import { DownloaderPage } from './features/downloader/DownloaderPage'
 import { EditorPage } from './features/editor/EditorPage'
 import { useEditorSettings } from './features/editor/useEditorSettings'
@@ -15,8 +15,30 @@ const NAV: readonly { id: PageId; label: string; icon: IconName }[] = [
   { id: 'library', label: 'Library', icon: 'grid' }
 ]
 
+const SIDEBAR_KEY = 'sidebar-collapsed'
+
+function readCollapsed(): boolean {
+  try {
+    return localStorage.getItem(SIDEBAR_KEY) === '1'
+  } catch {
+    return false
+  }
+}
+
 export default function App() {
   const [page, setPage] = useState<PageId>('editor')
+  const [collapsed, setCollapsed] = useState(readCollapsed)
+
+  const toggleSidebar = (): void => {
+    setCollapsed((prev) => {
+      try {
+        localStorage.setItem(SIDEBAR_KEY, prev ? '0' : '1')
+      } catch {
+        /* storage unavailable: the choice just won't persist */
+      }
+      return !prev
+    })
+  }
   // Editor settings live here so they survive switching pages.
   const editor = useEditorSettings()
 
@@ -119,20 +141,36 @@ export default function App() {
   }
 
   return (
-    <div className="app">
+    <div className={collapsed ? 'app app--collapsed' : 'app'}>
       <nav className="sidebar" aria-label="Main">
+        <div className="brand">
+          <BrandMark />
+          <span className="brand__name">Reelszer</span>
+        </div>
         {NAV.map((item) => (
           <button
             key={item.id}
             type="button"
             className="nav-item"
+            data-tooltip={item.label}
             aria-current={page === item.id ? 'page' : undefined}
             onClick={() => setPage(item.id)}
           >
             <Icon name={item.icon} size={20} />
-            <span>{item.label}</span>
+            <span className="nav-item__label">{item.label}</span>
           </button>
         ))}
+        <button
+          type="button"
+          className="nav-item sidebar__toggle"
+          data-tooltip="Expand sidebar"
+          aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          aria-expanded={!collapsed}
+          onClick={toggleSidebar}
+        >
+          <Icon name="chevron" size={20} />
+          <span className="nav-item__label">Collapse</span>
+        </button>
       </nav>
 
       <main className="main">

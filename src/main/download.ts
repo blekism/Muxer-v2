@@ -17,11 +17,15 @@ const FILE = '__FILE__'
 interface DownloadRecord extends Omit<DownloadItem, 'thumbnailUrl'> {
   filePath?: string
   thumbnailPath?: string
+  /** Sequential batch number, shared by every item of a batch. Missing on older history. */
+  batchNumber?: number
 }
 
 interface DownloadStore {
   folder: string
   items: DownloadRecord[]
+  /** Number given to the next batch. */
+  nextBatch: number
 }
 
 let store: DownloadStore | null = null
@@ -45,14 +49,19 @@ async function ensureStore(): Promise<DownloadStore> {
   if (store) return store
   const fallback: DownloadStore = {
     folder: join(app.getPath('videos'), 'TikTok Downloads'),
-    items: []
+    items: [],
+    nextBatch: 1
   }
   try {
     const saved = JSON.parse(await readFile(storePath(), 'utf8')) as Partial<DownloadStore>
     store = {
       folder: typeof saved.folder === 'string' ? saved.folder : fallback.folder,
-      items: Array.isArray(saved.items) ? saved.items : []
+      items: Array.isArray(saved.items) ? saved.items : [],
+      nextBatch: 1
     }
+    const highest = Math.max(0, ...store.items.map((record) => record.batchNumber ?? 0))
+    store.nextBatch =
+      typeof saved.nextBatch === 'number' ? Math.max(saved.nextBatch, highest + 1) : highest + 1
     // Jobs that were running when the app closed can't be resumed in place.
     for (const record of store.items) {
       if (record.status === 'queued' || record.status === 'downloading') {
@@ -118,6 +127,22 @@ async function ytDlpPath(): Promise<string> {
     throw new Error('yt-dlp.exe is missing. Put it in resources/ next to ffmpeg.exe.')
   }
   return target
+}
+
+/**
+ * Batch items go in their own `Batch <number> <date>` subfolder. The date comes from the shared
+ * `createdAt`, so retries land in the same folder. Items from before batch numbers existed fall
+ * back to `Batch <date time>`.
+ */
+function outputFolder(record: DownloadRecord, root: string): string {
+  if (!record.batchId) return root
+  const d = new Date(record.createdAt)
+  const p = (n: number): string => String(n).padStart(2, '0')
+  const date = `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
+  const name = record.batchNumber
+    ? `Batch ${record.batchNumber} ${date}`
+    : `Batch ${date} ${p(d.getHours())}-${p(d.getMinutes())}`
+  return join(root, name)
 }
 
 function buildArgs(url: string, folder: string): string[] {
@@ -200,15 +225,16 @@ async function runJob(record: DownloadRecord): Promise<void> {
 
   try {
     const { folder } = await ensureStore()
+    const target = outputFolder(record, folder)
     const [exe] = await Promise.all([
       ytDlpPath(),
-      mkdir(folder, { recursive: true }),
+      mkdir(target, { recursive: true }),
       mkdir(thumbsDir(), { recursive: true })
     ])
     if (cancelled.has(record.id)) throw new Error('Cancelled')
 
     await new Promise<void>((resolve, reject) => {
-      const child = spawn(exe, buildArgs(record.url, folder), {
+      const child = spawn(exe, buildArgs(record.url, target), {
         windowsHide: true,
         env: { ...process.env, PYTHONIOENCODING: 'utf-8', PYTHONUTF8: '1' }
       })
@@ -268,6 +294,7 @@ export async function startDownloads(urls: string[], mode: DownloadMode): Promis
   const current = await ensureStore()
   const createdAt = Date.now()
   const batchId = mode === 'batch' ? crypto.randomUUID() : undefined
+  const batchNumber = batchId ? current.nextBatch++ : undefined
   for (const url of urls) {
     if (typeof url !== 'string' || !/^https?:\/\//i.test(url)) continue
     const record: DownloadRecord = {
@@ -276,6 +303,7 @@ export async function startDownloads(urls: string[], mode: DownloadMode): Promis
       title: 'Fetching details…',
       mode,
       batchId,
+      batchNumber,
       status: 'queued',
       progress: 0,
       createdAt
