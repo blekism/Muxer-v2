@@ -7,7 +7,8 @@ import type {
   SourceVideo,
   VerticalAlign
 } from '../../types'
-import { TEMPERATURE_KELVIN, fontStack } from './config'
+import { TEMPERATURE_KELVIN, fontStyle } from './config'
+import { applyTextCase } from '../../../../shared/fonts'
 import {
   PERSPECTIVE_CSS_DISTANCE,
   TINT_INVERSE_WEIGHT_MATRIX,
@@ -91,7 +92,7 @@ export function PreviewColumn({ source, missing, caption, settings, music }: Pre
   // Sizes use container query units so the caption scales with the preview frame.
   const toCqw = (px: number) => `${(px / REFERENCE_WIDTH) * 100}cqw`
   const captionStyle: CSSProperties = {
-    fontFamily: fontStack(text.font),
+    ...fontStyle(text.font),
     fontSize: toCqw(text.size),
     color: text.fill,
     textAlign: text.hAlign,
@@ -205,7 +206,7 @@ export function PreviewColumn({ source, missing, caption, settings, music }: Pre
                   }}
                 >
                   <p className="preview__caption-text" style={captionStyle}>
-                    {caption}
+                    {applyTextCase(caption, text.textCase)}
                   </p>
                 </div>
               )}

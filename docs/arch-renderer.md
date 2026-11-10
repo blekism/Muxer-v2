@@ -22,7 +22,7 @@ Everything the user sees and interacts with. It has no Node or filesystem access
   - `PreviewColumn` — live CSS preview of the active source.
   - `SettingsColumn` — per-source text/caption, video and audio controls, and export quality.
   - `useEditorSettings.ts` — reducer holding `EditorSettings`. Settings are stored per source in `sourceSettings[sourceId]`. It exposes `EditorApi`.
-  - `config.ts` — `VIDEO_CONTROLS` (range, step, neutral value, randomize range, optional `display` scale), defaults, fonts, swatches and quality options. Values are **in FFmpeg units**, and the export uses them unchanged.
+  - `config.ts` — `VIDEO_CONTROLS` (range, step, neutral value, randomize range, optional `display` scale), defaults, `fontStyle(id)` (CSS family/weight from `src/shared/fonts.ts`), swatches and quality options. Values are **in FFmpeg units**, and the export uses them unchanged.
   - Temperature, tint, and vignette have `display: 0–100`. `toDisplay`/`fromDisplay` map linearly between that scale and the FFmpeg range in `SettingsColumn`, so state still holds Kelvin / gs / radians. On the temperature slider, 0 = 4200K (warm) and 100 = 6800K, with neutral 6500K at about 88.
   - `previewMath.ts` — converts FFmpeg units to CSS-preview values (a temperature `feColorMatrix`, the tint shadow-lift matrix, the vignette gradient, perspective). This is the only place unit conversion for the preview happens.
   - `PreviewColumn` applies temperature and tint as one inline SVG filter on the `<video>`, in sRGB and in FFmpeg's order. Vignette is a gradient overlay on top.
@@ -45,3 +45,6 @@ Everything the user sees and interacts with. It has no Node or filesystem access
 - Per-source settings are keyed by source id. `App` reads them with `editor.getSourceSettings(id)` when it builds the export request.
 - Open problem: the preview does not match the exported output (see `issues.txt`).
 - Import style is mixed: `@renderer/types` alias, relative paths, and one `src/shared/types` import in `App.tsx`. The formatting also varies (semicolons in `lib/`, `main.tsx` and the downloader and library pages; none in `App.tsx` and the editor), so prefer the Prettier style when you touch a file.
+
+- **Fonts:** `src/shared/fonts.ts` lists the caption fonts. `src/renderer/src/fonts.ts` registers the `resources/fonts/*.ttf` files via `FontFace` at startup, and the export uses the same files through `fontfile=`, so preview and output match. The Font panel is a grid of `role=radio` cards.
+- **Caption case:** the Font panel's "Case" control sets `TextStyle.textCase` (`none`/`upper`/`lower`). `applyTextCase` (in `src/shared/fonts.ts`) transforms the caption text in both `PreviewColumn` and `export.ts`.

@@ -45,8 +45,11 @@ export interface SavedEditorLibrary {
 export type VerticalAlign = 'top' | 'center' | 'bottom'
 export type HorizontalAlign = 'left' | 'center' | 'right'
 
+export type TextCase = 'none' | 'upper' | 'lower'
+
 export interface TextStyle {
   font: string
+  textCase: TextCase
   size: number
   outline: number
   fill: string
