@@ -1,5 +1,6 @@
 import {
   useId,
+  useState,
   type ButtonHTMLAttributes,
   type CSSProperties,
   type JSX,
@@ -55,6 +56,7 @@ const ICON_PATHS = {
   retry: ['M21 12a9 9 0 1 1-3-6.7L21 8', 'M21 3v5h-5'],
   close: ['M6 6l12 12', 'M18 6L6 18'],
   chevron: ['M9 6l6 6-6 6'],
+  check: ['M5 12l5 5L20 7'],
   warning: ['M12 4l9 16H3z', 'M12 10v4', 'M12 17h.01']
 } as const
 
@@ -228,7 +230,11 @@ export function Thumb({
   alt?: string
   className?: string
 }) {
-  if (!src) {
+  // A broken src (e.g. the image was deleted) falls back to the placeholder.
+  // Keyed by src so a new src gets a fresh attempt.
+  const [failedSrc, setFailedSrc] = useState<string | null>(null)
+
+  if (!src || failedSrc === src) {
     return (
       <span className={cx('thumb', 'thumb--empty', className)} aria-hidden="true">
         <Icon name="film" size={18} />
@@ -236,7 +242,14 @@ export function Thumb({
     )
   }
   return (
-    <img className={cx('thumb', className)} src={src} alt={alt} loading="lazy" decoding="async" />
+    <img
+      className={cx('thumb', className)}
+      src={src}
+      alt={alt}
+      loading="lazy"
+      decoding="async"
+      onError={() => setFailedSrc(src)}
+    />
   )
 }
 
@@ -250,14 +263,25 @@ interface SliderProps {
   step: number
   unit?: string
   format?: (value: number) => string
+  disabled?: boolean
   onChange: (value: number) => void
 }
 
-export function Slider({ label, value, min, max, step, unit = '', format, onChange }: SliderProps) {
+export function Slider({
+  label,
+  value,
+  min,
+  max,
+  step,
+  unit = '',
+  format,
+  disabled = false,
+  onChange
+}: SliderProps) {
   const id = useId()
   const percent = ((value - min) / (max - min)) * 100
   return (
-    <div className="slider">
+    <div className={cx('slider', disabled && 'slider--disabled')}>
       <div className="slider__row">
         <label htmlFor={id}>{label}</label>
         <output htmlFor={id}>
@@ -271,6 +295,7 @@ export function Slider({ label, value, min, max, step, unit = '', format, onChan
         max={max}
         step={step}
         value={value}
+        disabled={disabled}
         style={{ '--pct': `${percent}%` } as CSSProperties}
         onChange={(e) => onChange(Number(e.target.value))}
       />
@@ -319,6 +344,8 @@ export interface RadioListItem {
   id: string
   label: string
   meta?: string
+  /** The item's file no longer exists on disk. */
+  missing?: boolean
 }
 
 interface RadioListProps {
@@ -358,7 +385,10 @@ export function RadioList({
           </li>
         )}
         {items.map((item) => (
-          <li key={item.id} className="radio-list__item">
+          <li
+            key={item.id}
+            className={cx('radio-list__item', item.missing && 'radio-list__item--missing')}
+          >
             <label className="radio-list__label">
               <input
                 type="radio"
@@ -370,7 +400,9 @@ export function RadioList({
                 <span className="truncate" title={item.label}>
                   {item.label}
                 </span>
-                {item.meta && <small>{item.meta}</small>}
+                {item.meta && (
+                  <small className={item.missing ? 'missing-label' : undefined}>{item.meta}</small>
+                )}
               </span>
             </label>
             {onDelete && (

@@ -3,7 +3,6 @@ import { mkdir, readdir, stat, unlink, writeFile } from 'node:fs/promises'
 import { basename, extname, join, parse } from 'node:path'
 import { promisify } from 'node:util'
 import type {
-  ExportProgress,
   ExportRequest,
   ExportResult,
   SourceEditSettings
@@ -250,11 +249,12 @@ async function renderSource(
 export async function exportVideos(
   request: ExportRequest,
   outputDirectory: string,
-  onProgress: (progress: ExportProgress) => void,
+  onProgress: (progress: { completed: number; total: number; sourceName: string }) => void,
   signal: AbortSignal
 ): Promise<ExportResult> {
   await mkdir(outputDirectory, { recursive: true })
-  const images = await imagePaths(request.photoFolderPath)
+  // Old version: ExportRequest no longer carries a photo folder.
+  const images = await imagePaths(null)
   const outputPaths: string[] = []
 
   for (let index = 0; index < request.sources.length; index += 1) {
@@ -273,7 +273,7 @@ export async function exportVideos(
     onProgress({ completed: index + 1, total: request.sources.length, sourceName: source.name })
   }
 
-  return { outputPaths }
+  return { outputPaths, failures: [] }
 }
 
 async function uniqueOutputPath(directory: string, fileName: string): Promise<string> {

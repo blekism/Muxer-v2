@@ -1,18 +1,20 @@
 import { app, shell, BrowserWindow, dialog, ipcMain, protocol } from 'electron'
 import { execFile } from 'node:child_process'
 import { createReadStream } from 'node:fs'
-import { readFile, readdir, stat, writeFile } from 'node:fs/promises'
+import { readFile, stat, writeFile } from 'node:fs/promises'
 import { join } from 'path'
 import { basename, extname } from 'node:path'
 import { Readable } from 'node:stream'
 import { promisify } from 'node:util'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
+import type { Stats } from 'node:fs'
 import type {
   DownloadMode,
+  ExportOutcome,
   ExportRequest,
   MusicTrack,
-  PhotoFolder,
+  FlashImageSelection,
   SavedEditorLibrary,
   SourceVideo
 } from '../shared/types'
@@ -28,7 +30,9 @@ import {
   showDownload,
   startDownloads
 } from './download'
-import { exportVideos } from './export'
+import { exportVideos, findMissingInputs, showExportedFile } from './export'
+import { MAX_FLASH_IMAGES } from '../shared/flashConstants'
+import { initFileWatch, recheckWatchedPaths, setWatchedPaths } from './fileWatch'
 import { ffprobePath } from './utils/ffpaths'
 import { testFFmpeg } from './utils/test-ffpaths'
 
@@ -156,25 +160,24 @@ async function probeVideo(filePath: string): Promise<SourceVideo> {
   }
 }
 
-async function choosePhotoFolder(): Promise<PhotoFolder | null> {
-  const result = await dialog.showOpenDialog({ properties: ['openDirectory'] })
-  if (result.canceled) return null
+async function chooseFlashImages(): Promise<FlashImageSelection | null> {
+  const result = await dialog.showOpenDialog({
+    properties: ['openFile', 'multiSelections'],
+    filters: [{ name: 'Images', extensions: [...imageExtensions].map((ext) => ext.slice(1)) }]
+  })
+  if (result.canceled || result.filePaths.length === 0) return null
 
-  const folderPath = result.filePaths[0]
-  const entries = await readdir(folderPath, { withFileTypes: true })
-  const images = entries
-    .filter((entry) => entry.isFile() && imageExtensions.has(extname(entry.name).toLowerCase()))
-    .sort((left, right) => left.name.localeCompare(right.name))
-    .map((entry) => {
-      const filePath = join(folderPath, entry.name)
-      return {
-        id: crypto.randomUUID(),
-        name: entry.name,
-        url: createMediaUrl(filePath)
-      }
-    })
+  const picked = result.filePaths.filter((filePath) =>
+    imageExtensions.has(extname(filePath).toLowerCase())
+  )
+  const images = picked.slice(0, MAX_FLASH_IMAGES).map((filePath) => ({
+    id: crypto.randomUUID(),
+    name: basename(filePath),
+    path: filePath,
+    url: createMediaUrl(filePath)
+  }))
 
-  return { path: folderPath, images }
+  return { images, pickedCount: picked.length }
 }
 
 async function importMusic(): Promise<MusicTrack[]> {
@@ -229,10 +232,17 @@ async function importVideos(): Promise<SourceVideo[]> {
 function createWindow(): void {
   // Create the browser window.
   const mainWindow = new BrowserWindow({
-    width: 900,
-    height: 670,
+    width: 1000,
+    height: 700,
+    minWidth: 1000,
+    minHeight: 700,
     show: false,
     autoHideMenuBar: true,
+    backgroundColor: '#000000',
+    // Hide the native (OS accent-colored) title bar; the renderer draws its own and the
+    // window controls are recolored to match the app's --chrome / --text-muted tokens.
+    titleBarStyle: 'hidden',
+    titleBarOverlay: { color: '#0f0f12', symbolColor: '#d4cde0', height: 32 },
     ...(process.platform === 'linux' ? { icon } : {}),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
@@ -271,7 +281,19 @@ app.whenReady().then(() => {
       return new Response('Media file not found', { status: 404 })
     }
 
-    const fileStats = await stat(filePath)
+    let fileStats: Stats
+    try {
+      fileStats = await stat(filePath)
+    } catch {
+      // Deleted or moved since it was imported.
+      return new Response('Media file not found', { status: 404 })
+    }
+    // A file deleted mid-stream errors the stream; without a listener that would be unhandled.
+    const openStream = (options?: { start: number; end: number }): ReadableStream => {
+      const stream = createReadStream(filePath, options)
+      stream.on('error', (error) => console.warn('[media] read failed', filePath, error.message))
+      return Readable.toWeb(stream) as ReadableStream
+    }
     const range = request.headers.get('range')
     const headers = new Headers({
       'Accept-Ranges': 'bytes',
@@ -281,10 +303,7 @@ app.whenReady().then(() => {
 
     if (!range) {
       headers.set('Content-Length', String(fileStats.size))
-      return new Response(Readable.toWeb(createReadStream(filePath)) as ReadableStream, {
-        status: 200,
-        headers
-      })
+      return new Response(openStream(), { status: 200, headers })
     }
 
     const match = /^bytes=(\d+)-(\d*)$/.exec(range)
@@ -301,13 +320,7 @@ app.whenReady().then(() => {
 
     headers.set('Content-Length', String(end - start + 1))
     headers.set('Content-Range', `bytes ${start}-${end}/${fileStats.size}`)
-    return new Response(
-      Readable.toWeb(createReadStream(filePath, { start, end })) as ReadableStream,
-      {
-        status: 206,
-        headers
-      }
-    )
+    return new Response(openStream({ start, end }), { status: 206, headers })
   })
   // Set app user model id for windows
   electronApp.setAppUserModelId('com.electron')
@@ -322,37 +335,53 @@ app.whenReady().then(() => {
   // IPC test
   ipcMain.on('ping', () => console.log('pong'))
   ipcMain.handle('videos:import', importVideos)
-  ipcMain.handle('photos:choose-folder', choosePhotoFolder)
+  ipcMain.handle('photos:choose', chooseFlashImages)
   ipcMain.handle('library:load', loadLibrary)
   ipcMain.handle('library:save', (_event, library: SavedEditorLibrary) => saveLibrary(library))
   ipcMain.handle('music:import', importMusic)
-  ipcMain.handle('export:run', async (event, request: ExportRequest) => {
+  ipcMain.handle('export:run', async (event, request: ExportRequest): Promise<ExportOutcome> => {
     if (activeExportController) throw new Error('An export is already running')
+
+    const missing = await findMissingInputs(request)
+    if (missing.length > 0) return { kind: 'missing', paths: missing }
 
     const result = await dialog.showOpenDialog({
       properties: ['openDirectory', 'createDirectory'],
       defaultPath: app.getPath('videos')
     })
 
-    if (result.canceled) return null
+    if (result.canceled) return { kind: 'cancelled' }
 
     const controller = new AbortController()
     activeExportController = controller
 
     try {
-      return await exportVideos(
+      const exported = await exportVideos(
         request,
         result.filePaths[0],
         (progress) => event.sender.send('export:progress', progress),
         controller.signal
       )
+      return { kind: 'done', ...exported }
     } finally {
       activeExportController = null
     }
   })
+  ipcMain.handle('export:show', (_event, filePath: string) => showExportedFile(filePath))
   ipcMain.handle('export:cancel', () => {
     activeExportController?.abort()
   })
+
+  initFileWatch((changes) => {
+    for (const window of BrowserWindow.getAllWindows()) {
+      window.webContents.send('files:status', changes)
+    }
+  })
+  ipcMain.handle('files:watch', (_event, paths: string[]) =>
+    setWatchedPaths(Array.isArray(paths) ? paths : [])
+  )
+  // Catch changes made while the app was in the background without waiting for the poll.
+  app.on('browser-window-focus', recheckWatchedPaths)
 
   initDownloads(createMediaUrl)
   void autoUpdateYtDlp()

@@ -6,10 +6,13 @@ export type {
   DownloadItem,
   DownloadMode,
   DownloadStatus,
+  ExportJob,
+  ExportJobStatus,
   ExportQuality,
   HorizontalAlign,
   MusicTrack,
-  PhotoFolder,
+  FlashImage,
+  FlashImageSelection,
   SavedEditorLibrary,
   SourceEditSettings,
   SourceVideo,
@@ -22,4 +25,8 @@ export interface EditorSettings {
   sourceSettings: Record<string, SourceEditSettings>
   quality: ExportQuality
   activeSourceId: string | null
+  /** Every exported copy gets random video props; manual video edits are locked. */
+  fullRandomize: boolean
+  /** Outputs per source video. */
+  copies: number
 }

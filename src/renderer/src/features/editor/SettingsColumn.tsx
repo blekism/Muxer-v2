@@ -4,6 +4,8 @@ import { formatDuration } from '../../lib/format'
 import type { HorizontalAlign, MusicTrack, VerticalAlign } from '../../types'
 import {
   FONT_OPTIONS,
+  MAX_COPIES,
+  MIN_COPIES,
   QUALITY_OPTIONS,
   TEXT_SWATCHES,
   VIDEO_CONTROLS,
@@ -11,6 +13,7 @@ import {
   fromDisplay,
   toDisplay
 } from './config'
+import { clampCopies } from '../../../../shared/exportConstants'
 import type { EditorApi } from './useEditorSettings'
 
 const VERTICAL_OPTIONS: readonly { value: VerticalAlign; label: string }[] = [
@@ -28,6 +31,7 @@ interface SettingsColumnProps {
   editor: EditorApi
   sourceId: string | null
   music: readonly MusicTrack[]
+  missingPaths: ReadonlySet<string>
   activeMusicId: string | null
   onImportMusic: () => void
   onRemoveMusic: (id: string) => void
@@ -37,6 +41,7 @@ export function SettingsColumn({
   editor,
   sourceId,
   music,
+  missingPaths,
   activeMusicId,
   onImportMusic,
   onRemoveMusic
@@ -44,6 +49,7 @@ export function SettingsColumn({
   const { settings, actions } = editor
   const { text, video, audio } = editor.getSourceSettings(sourceId)
   const fontId = useId()
+  const locked = settings.fullRandomize
 
   return (
     <div className="editor__col editor__col--settings">
@@ -125,6 +131,7 @@ export function SettingsColumn({
               size="sm"
               variant="ghost"
               icon="reset"
+              disabled={locked}
               onClick={() => sourceId && actions.resetVideo(sourceId)}
             >
               Reset
@@ -132,6 +139,7 @@ export function SettingsColumn({
             <Button
               size="sm"
               icon="dice"
+              disabled={locked}
               onClick={() => sourceId && actions.randomizeVideo(sourceId)}
             >
               Randomize
@@ -149,11 +157,25 @@ export function SettingsColumn({
             step={control.display ? 1 : control.step}
             unit={control.unit}
             format={control.format}
+            disabled={locked}
             onChange={(value) =>
               sourceId && actions.setVideoProp(sourceId, control.key, fromDisplay(control, value))
             }
           />
         ))}
+        <label className="checkbox-field">
+          <input
+            type="checkbox"
+            checked={locked}
+            onChange={(event) => actions.setFullRandomize(event.target.checked)}
+          />
+          <span>Fully randomize each copy</span>
+        </label>
+        {locked && (
+          <p className="field-hint">
+            Every exported copy of every video gets its own random values. Manual edits are locked.
+          </p>
+        )}
       </Panel>
 
       <Panel title="Audio">
@@ -186,11 +208,15 @@ export function SettingsColumn({
             selectedId={activeMusicId}
             onSelect={(id) => sourceId && actions.setMusic(sourceId, id)}
             onDelete={onRemoveMusic}
-            items={music.map((track) => ({
-              id: track.id,
-              label: track.name,
-              meta: formatDuration(track.durationSec)
-            }))}
+            items={music.map((track) => {
+              const missing = missingPaths.has(track.sourcePath)
+              return {
+                id: track.id,
+                label: track.name,
+                meta: missing ? 'File missing' : formatDuration(track.durationSec),
+                missing
+              }
+            })}
           />
         )}
       </Panel>
@@ -203,7 +229,40 @@ export function SettingsColumn({
           value={settings.quality}
           onChange={actions.setQuality}
         />
+        <CopiesField value={settings.copies} onChange={actions.setCopies} />
       </Panel>
+    </div>
+  )
+}
+
+function CopiesField({ value, onChange }: { value: number; onChange: (value: number) => void }) {
+  const id = useId()
+  // Never blank: an empty, invalid or too-small entry snaps straight back to the minimum.
+  const shown = Number.isFinite(value) ? clampCopies(value) : MIN_COPIES
+
+  return (
+    <div className="field copies-field">
+      <label className="field-label" htmlFor={id}>
+        Copies per video
+      </label>
+      <input
+        id={id}
+        className="input"
+        type="number"
+        inputMode="numeric"
+        min={MIN_COPIES}
+        max={MAX_COPIES}
+        step={1}
+        value={shown}
+        // Select on focus so typing a digit replaces the value instead of appending to it.
+        onFocus={(event) => event.target.select()}
+        onChange={(event) =>
+          onChange(event.target.value.trim() === '' ? MIN_COPIES : Number(event.target.value))
+        }
+      />
+      <p className="field-hint">
+        {MIN_COPIES} to {MAX_COPIES} versions generated from each source video.
+      </p>
     </div>
   )
 }

@@ -3,10 +3,10 @@ import type {
   DownloadItem,
   DownloadMode,
   ExportProgress,
+  ExportOutcome,
   ExportRequest,
-  ExportResult,
   MusicTrack,
-  PhotoFolder,
+  FlashImageSelection,
   SavedEditorLibrary,
   SourceVideo
 } from '../shared/types'
@@ -16,7 +16,7 @@ interface AppApi {
     import: () => Promise<SourceVideo[]>
   }
   photos: {
-    chooseFolder: () => Promise<PhotoFolder | null>
+    choose: () => Promise<FlashImageSelection | null>
   }
   library: {
     load: () => Promise<SavedEditorLibrary>
@@ -26,9 +26,17 @@ interface AppApi {
     import: () => Promise<MusicTrack[]>
   }
   export: {
-    run: (request: ExportRequest) => Promise<ExportResult | null>
+    run: (request: ExportRequest) => Promise<ExportOutcome>
     cancel: () => Promise<void>
+    /** Reveals an exported file in Explorer. Only paths written by an export are accepted. */
+    show: (filePath: string) => Promise<void>
     onProgress: (listener: (progress: ExportProgress) => void) => () => void
+  }
+  files: {
+    /** Replaces the set of paths main watches; changes arrive through onStatus. */
+    watch: (paths: string[]) => Promise<void>
+    /** Maps path -> exists for every path whose presence changed. */
+    onStatus: (listener: (changes: Record<string, boolean>) => void) => () => void
   }
   downloads: {
     list: () => Promise<DownloadItem[]>

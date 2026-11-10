@@ -11,9 +11,17 @@ export interface SourceVideo {
   height: number
 }
 
-export interface PhotoFolder {
+export interface FlashImage {
+  id: string
+  name: string
   path: string
-  images: { id: string; name: string; url: string }[]
+  url: string
+}
+
+export interface FlashImageSelection {
+  images: FlashImage[]
+  /** How many files were picked before the list was cut to MAX_FLASH_IMAGES. */
+  pickedCount: number
 }
 
 export interface CaptionPreset {
@@ -76,18 +84,49 @@ export interface ExportRequest {
   sourceSettings: Record<string, SourceEditSettings>
   presets: CaptionPreset[]
   music: MusicTrack[]
-  photoFolderPath: string | null
+  flashImagePaths: string[]
   quality: ExportQuality
+  /** Outputs per source, 1 to MAX_COPIES. */
+  copies: number
+  /** Per source id: the video props for each copy (length = copies). */
+  videoVariants: Record<string, VideoProps[]>
+}
+
+export interface ExportFailure {
+  sourceName: string
+  error: string
 }
 
 export interface ExportResult {
   outputPaths: string[]
+  /** Sources skipped because one of their files disappeared during the export. */
+  failures: ExportFailure[]
 }
 
+export type ExportOutcome =
+  | { kind: 'cancelled' }
+  /** Nothing was exported: these referenced files no longer exist. */
+  | { kind: 'missing'; paths: string[] }
+  | ({ kind: 'done' } & ExportResult)
+
+export type ExportJobStatus = 'queued' | 'rendering' | 'done' | 'failed'
+
+/** One output file of an export: one copy of one source video. */
+export interface ExportJob {
+  id: string
+  /** Output file name, e.g. clip_edited_v2.mp4. */
+  label: string
+  status: ExportJobStatus
+  /** 0 to 100. */
+  percent: number
+  /** Set once the file is written. */
+  outputPath?: string
+  error?: string
+}
+
+/** Full snapshot of every job, sent whole so out-of-order events can't corrupt it. */
 export interface ExportProgress {
-  completed: number
-  total: number
-  sourceName: string
+  jobs: ExportJob[]
 }
 
 export type DownloadStatus = 'queued' | 'downloading' | 'done' | 'failed'

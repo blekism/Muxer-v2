@@ -43,3 +43,8 @@ export function formatRelativeTime(timestamp: number, now: number = Date.now()):
 export function pluralize(count: number, singular: string, plural = `${singular}s`): string {
   return `${count} ${count === 1 ? singular : plural}`;
 }
+
+/** Last segment of a Windows or POSIX path. */
+export function fileName(filePath: string): string {
+  return filePath.split(/[\\/]/).filter(Boolean).pop() ?? filePath;
+}

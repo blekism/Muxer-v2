@@ -1,15 +1,19 @@
 import { useId, useState, type FormEvent } from 'react';
-import { Button, EmptyState, IconButton, Panel, RadioList, Thumb } from '../../components/ui';
+import { Button, EmptyState, IconButton, Panel, RadioList, Thumb, cx } from '../../components/ui';
 import { formatDuration, pluralize } from '../../lib/format';
-import type { CaptionPreset, PhotoFolder, SourceVideo } from '../../types';
+import type { CaptionPreset, FlashImage, SourceVideo } from '../../types';
+import { MAX_FLASH_IMAGES } from '../../../../shared/flashConstants';
 
 interface MediaColumnProps {
-  photoFolder: PhotoFolder | null;
+  flashImages: readonly FlashImage[];
+  flashNotice: string | null;
+  missingPaths: ReadonlySet<string>;
   sources: readonly SourceVideo[];
   activeSourceId: string | null;
   presets: readonly CaptionPreset[];
   activePresetId: string | null;
-  onPickPhotoFolder: () => void;
+  onPickFlashImages: () => void;
+  onRemoveFlashImage: (id: string) => void;
   onImportVideos: () => void;
   onSelectSource: (id: string) => void;
   onRemoveSource: (id: string) => void;
@@ -21,9 +25,16 @@ interface MediaColumnProps {
 export function MediaColumn(props: MediaColumnProps) {
   return (
     <div className="editor__col editor__col--media">
-      <PhotosPanel folder={props.photoFolder} onPick={props.onPickPhotoFolder} />
+      <PhotosPanel
+        images={props.flashImages}
+        notice={props.flashNotice}
+        missingPaths={props.missingPaths}
+        onPick={props.onPickFlashImages}
+        onRemove={props.onRemoveFlashImage}
+      />
       <SourcesPanel
         sources={props.sources}
+        missingPaths={props.missingPaths}
         activeId={props.activeSourceId}
         onImport={props.onImportVideos}
         onSelect={props.onSelectSource}
@@ -40,28 +51,61 @@ export function MediaColumn(props: MediaColumnProps) {
   );
 }
 
-function PhotosPanel({ folder, onPick }: { folder: PhotoFolder | null; onPick: () => void }) {
+function PhotosPanel({
+  images,
+  notice,
+  missingPaths,
+  onPick,
+  onRemove,
+}: {
+  images: readonly FlashImage[];
+  notice: string | null;
+  missingPaths: ReadonlySet<string>;
+  onPick: () => void;
+  onRemove: (id: string) => void;
+}) {
+  const missingCount = images.filter((image) => missingPaths.has(image.path)).length;
+  const full = images.length >= MAX_FLASH_IMAGES;
   return (
     <Panel
       title="Flash images"
       actions={
-        <Button size="sm" icon="folder" onClick={onPick}>
-          Choose folder
+        <Button
+          size="sm"
+          icon="plus"
+          onClick={onPick}
+          disabled={full}
+          title={full ? `Limit of ${MAX_FLASH_IMAGES} reached. Remove an image to add another.` : undefined}
+        >
+          Add images
         </Button>
       }
     >
-      {folder ? (
+      {images.length > 0 ? (
         <>
           <div className="folder-info">
-            <span className="truncate" title={folder.path}>
-              {folder.path}
+            <span className="muted">
+              {images.length} / {MAX_FLASH_IMAGES} images
             </span>
-            <span className="muted">{pluralize(folder.images.length, 'image')}</span>
+            {missingCount > 0 && (
+              <span className="missing-label">{pluralize(missingCount, 'image')} missing</span>
+            )}
+            {notice && <span className="muted">{notice}</span>}
           </div>
           <ul className="thumb-grid">
-            {folder.images.map((image) => (
-              <li key={image.id}>
+            {images.map((image) => (
+              <li
+                key={image.id}
+                className={cx('thumb-grid__item', missingPaths.has(image.path) && 'thumb-grid__item--missing')}
+                title={missingPaths.has(image.path) ? `${image.name} (missing)` : image.name}
+              >
                 <Thumb src={image.url} alt={image.name} />
+                <IconButton
+                  icon="close"
+                  label={`Remove ${image.name}`}
+                  className="thumb-grid__remove"
+                  onClick={() => onRemove(image.id)}
+                />
               </li>
             ))}
           </ul>
@@ -69,8 +113,8 @@ function PhotosPanel({ folder, onPick }: { folder: PhotoFolder | null; onPick: (
       ) : (
         <EmptyState
           icon="image"
-          title="No folder chosen"
-          hint="Images from the folder flash at random positions during the video."
+          title="No images chosen"
+          hint={`Each image flashes once at a random point in the video (up to ${MAX_FLASH_IMAGES}).`}
         />
       )}
     </Panel>
@@ -79,13 +123,14 @@ function PhotosPanel({ folder, onPick }: { folder: PhotoFolder | null; onPick: (
 
 interface SourcesPanelProps {
   sources: readonly SourceVideo[];
+  missingPaths: ReadonlySet<string>;
   activeId: string | null;
   onImport: () => void;
   onSelect: (id: string) => void;
   onRemove: (id: string) => void;
 }
 
-function SourcesPanel({ sources, activeId, onImport, onSelect, onRemove }: SourcesPanelProps) {
+function SourcesPanel({ sources, missingPaths, activeId, onImport, onSelect, onRemove }: SourcesPanelProps) {
   return (
     <Panel
       title="Source videos"
@@ -99,8 +144,10 @@ function SourcesPanel({ sources, activeId, onImport, onSelect, onRemove }: Sourc
         <EmptyState icon="film" title="No videos yet" hint="Import the videos you want to edit." />
       ) : (
         <ul className="source-list">
-          {sources.map((source) => (
-            <li key={source.id} className="source">
+          {sources.map((source) => {
+            const missing = missingPaths.has(source.sourcePath);
+            return (
+            <li key={source.id} className={cx('source', missing && 'source--missing')}>
               <button
                 type="button"
                 className="source__select"
@@ -112,12 +159,17 @@ function SourcesPanel({ sources, activeId, onImport, onSelect, onRemove }: Sourc
                   <span className="truncate" title={source.name}>
                     {source.name}
                   </span>
-                  <small>{formatDuration(source.durationSec)}</small>
+                  {missing ? (
+                    <small className="missing-label">File missing</small>
+                  ) : (
+                    <small>{formatDuration(source.durationSec)}</small>
+                  )}
                 </span>
               </button>
               <IconButton icon="trash" label={`Remove ${source.name}`} onClick={() => onRemove(source.id)} />
             </li>
-          ))}
+            );
+          })}
         </ul>
       )}
     </Panel>

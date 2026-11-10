@@ -4,10 +4,10 @@ import type {
   DownloadItem,
   DownloadMode,
   ExportProgress,
+  ExportOutcome,
   ExportRequest,
-  ExportResult,
   MusicTrack,
-  PhotoFolder,
+  FlashImageSelection,
   SavedEditorLibrary,
   SourceVideo
 } from '../shared/types'
@@ -18,7 +18,7 @@ const api = {
     import: (): Promise<SourceVideo[]> => ipcRenderer.invoke('videos:import')
   },
   photos: {
-    chooseFolder: (): Promise<PhotoFolder | null> => ipcRenderer.invoke('photos:choose-folder')
+    choose: (): Promise<FlashImageSelection | null> => ipcRenderer.invoke('photos:choose')
   },
   library: {
     load: (): Promise<SavedEditorLibrary> => ipcRenderer.invoke('library:load'),
@@ -29,14 +29,24 @@ const api = {
     import: (): Promise<MusicTrack[]> => ipcRenderer.invoke('music:import')
   },
   export: {
-    run: (request: ExportRequest): Promise<ExportResult | null> =>
+    run: (request: ExportRequest): Promise<ExportOutcome> =>
       ipcRenderer.invoke('export:run', request),
     cancel: (): Promise<void> => ipcRenderer.invoke('export:cancel'),
+    show: (filePath: string): Promise<void> => ipcRenderer.invoke('export:show', filePath),
     onProgress: (listener: (progress: ExportProgress) => void): (() => void) => {
       const handler = (_event: Electron.IpcRendererEvent, progress: ExportProgress) =>
         listener(progress)
       ipcRenderer.on('export:progress', handler)
       return () => ipcRenderer.removeListener('export:progress', handler)
+    }
+  },
+  files: {
+    watch: (paths: string[]): Promise<void> => ipcRenderer.invoke('files:watch', paths),
+    onStatus: (listener: (changes: Record<string, boolean>) => void): (() => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, changes: Record<string, boolean>): void =>
+        listener(changes)
+      ipcRenderer.on('files:status', handler)
+      return () => ipcRenderer.removeListener('files:status', handler)
     }
   },
   downloads: {

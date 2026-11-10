@@ -1,11 +1,35 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { TitleBar } from './components/TitleBar'
 import { BrandMark, Icon, type IconName } from './components/ui'
 import { DownloaderPage } from './features/downloader/DownloaderPage'
 import { EditorPage } from './features/editor/EditorPage'
-import { useEditorSettings } from './features/editor/useEditorSettings'
+import { randomVideoProps, useEditorSettings } from './features/editor/useEditorSettings'
 import { LibraryPage } from './features/library/LibraryPage'
-import type { CaptionPreset, DownloadItem, MusicTrack, PhotoFolder, SourceVideo } from './types'
-import { ExportProgress } from 'src/shared/types'
+import { fileName } from './lib/format'
+import { MAX_FLASH_IMAGES } from '../../shared/flashConstants'
+import type { CaptionPreset, DownloadItem, FlashImage, MusicTrack, SourceVideo } from './types'
+import {
+  ExportProgressPanel,
+  type ExportPanelState,
+  type ExportRunState
+} from './components/ExportProgressPanel'
+
+/** Ends a run: anything that never finished is marked so it doesn't look stuck. */
+function finishPanel(
+  panel: ExportPanelState | null,
+  state: Exclude<ExportRunState, 'running'>
+): ExportPanelState | null {
+  if (!panel) return null
+  const reason = state === 'cancelled' ? 'Cancelled' : 'Not exported'
+  return {
+    state,
+    jobs: panel.jobs.map((job) =>
+      job.status === 'queued' || job.status === 'rendering'
+        ? { ...job, status: 'failed', error: reason }
+        : job
+    )
+  }
+}
 
 type PageId = 'editor' | 'downloader' | 'library'
 
@@ -43,16 +67,82 @@ export default function App() {
   const editor = useEditorSettings()
 
   const [sources, setSources] = useState<SourceVideo[]>([])
-  const [photoFolder, setPhotoFolder] = useState<PhotoFolder | null>(null)
+  const [flashImages, setFlashImages] = useState<FlashImage[]>([])
+  const [flashNotice, setFlashNotice] = useState<string | null>(null)
   const [presets, setPresets] = useState<CaptionPreset[]>([])
   const [music, setMusic] = useState<MusicTrack[]>([])
   const [libraryLoaded, setLibraryLoaded] = useState(false)
-  const [exportProgress, setExportProgress] = useState<ExportProgress | null>(null)
+  // Drives the bottom-right progress box; stays after the export ends until the user closes it.
+  const [exportProgress, setExportProgress] = useState<ExportPanelState | null>(null)
   const [downloads, setDownloads] = useState<DownloadItem[]>([])
   const [downloadFolder, setDownloadFolder] = useState('')
-  const isGenerating = exportProgress !== null
+  // Tracked separately from exportProgress: a late `export:progress` event can arrive after the
+  // invoke reply (Electron doesn't order the two), which would otherwise re-enable "Generating…".
+  const [isGenerating, setIsGenerating] = useState(false)
+  const isGeneratingRef = useRef(false)
+  const cancelRequestedRef = useRef(false)
+  // Referenced files main reports as gone from disk (deleted or moved).
+  const [missingPaths, setMissingPaths] = useState<ReadonlySet<string>>(() => new Set())
+  // `missing` errors clear themselves once every referenced file is back or removed.
+  const [exportError, setExportError] = useState<{ message: string; missing: boolean } | null>(null)
 
-  useEffect(() => window.api.export.onProgress(setExportProgress), [])
+  const watchedPaths = useMemo(() => {
+    const paths = new Set(sources.map((source) => source.sourcePath))
+    if (libraryLoaded) for (const track of music) paths.add(track.sourcePath)
+    for (const image of flashImages) paths.add(image.path)
+    return [...paths].sort()
+  }, [flashImages, libraryLoaded, music, sources])
+  // Paths can't contain a newline, so this key changes only when the set does.
+  const watchedKey = watchedPaths.join('\n')
+
+  useEffect(
+    () =>
+      window.api.files.onStatus((changes) =>
+        setMissingPaths((prev) => {
+          const next = new Set(prev)
+          for (const [path, exists] of Object.entries(changes)) {
+            if (exists) next.delete(path)
+            else next.add(path)
+          }
+          return next
+        })
+      ),
+    []
+  )
+
+  useEffect(() => {
+    // Main replies with the full status of this set, so stale entries for paths no longer
+    // referenced are harmless: nothing looks them up.
+    const paths = watchedKey ? watchedKey.split('\n') : []
+    void window.api.files.watch(paths).catch((error) => {
+      console.error('Unable to watch referenced files', error)
+    })
+  }, [watchedKey])
+
+  /** Missing files the export would read: sources, music they use, the flash images. */
+  const missingInputs = useMemo(() => {
+    const inputs = new Set(sources.map((source) => source.sourcePath))
+    for (const source of sources) {
+      const musicId = editor.getSourceSettings(source.id).audio.musicId
+      const track = music.find((m) => m.id === musicId)
+      if (track) inputs.add(track.sourcePath)
+    }
+    for (const image of flashImages) inputs.add(image.path)
+    return [...inputs].filter((path) => missingPaths.has(path))
+  }, [editor, flashImages, missingPaths, music, sources])
+
+  // A "missing files" error stops showing once every referenced file is back or removed.
+  const visibleExportError =
+    exportError && !(exportError.missing && missingInputs.length === 0) ? exportError.message : null
+
+  useEffect(
+    () =>
+      window.api.export.onProgress((progress) => {
+        // The first event arrives once a folder is chosen, so a cancelled dialog shows no box.
+        if (isGeneratingRef.current) setExportProgress({ jobs: progress.jobs, state: 'running' })
+      }),
+    []
+  )
 
   useEffect(() => {
     const unsubscribe = window.api.downloads.onUpdate((item) =>
@@ -117,9 +207,25 @@ export default function App() {
   }, [])
 
   const generateVideos = async () => {
-    if (sources.length === 0 || isGenerating) return
+    if (sources.length === 0 || isGeneratingRef.current) return
 
-    setExportProgress({ completed: 0, total: sources.length, sourceName: 'Preparing export' })
+    const missingMessage = (paths: string[]) =>
+      `Can't generate: ${paths.map(fileName).join(', ')} ${paths.length === 1 ? 'was' : 'were'} moved or deleted. Restore or remove ${paths.length === 1 ? 'it' : 'them'} first.`
+
+    if (missingInputs.length > 0) {
+      setExportError({ message: missingMessage(missingInputs), missing: true })
+      return
+    }
+    setExportError(null)
+    cancelRequestedRef.current = false
+
+    isGeneratingRef.current = true
+    setIsGenerating(true)
+    const { copies, fullRandomize } = editor.settings
+    const totalOutputs = sources.length * copies
+    // A new export replaces the previous run's box.
+    setExportProgress(null)
+    let finalState: Exclude<ExportRunState, 'running'> = 'error'
     try {
       const result = await window.api.export.run({
         sources,
@@ -128,26 +234,68 @@ export default function App() {
         ),
         presets,
         music,
-        photoFolderPath: photoFolder?.path ?? null,
-        quality: editor.settings.quality
+        flashImagePaths: flashImages.map((image) => image.path),
+        quality: editor.settings.quality,
+        copies,
+        videoVariants: Object.fromEntries(
+          sources.map((source) => {
+            const { video } = editor.getSourceSettings(source.id)
+            return [
+              source.id,
+              Array.from({ length: copies }, () => (fullRandomize ? randomVideoProps() : video))
+            ]
+          })
+        )
       })
 
-      if (result) console.log('Exported videos', result.outputPaths)
+      if (result.kind === 'missing') {
+        setExportError({ message: missingMessage(result.paths), missing: true })
+      } else if (result.kind === 'done') {
+        finalState = 'done'
+        console.log('Exported videos', result.outputPaths)
+        if (result.failures.length > 0) {
+          setExportError({
+            message: `Exported ${result.outputPaths.length} of ${totalOutputs}. Skipped ${result.failures
+              .map((failure) => `${failure.sourceName} (${failure.error})`)
+              .join('; ')}.`,
+            missing: false
+          })
+        }
+      }
     } catch (error) {
       console.error('Unable to export videos', error)
+      if (cancelRequestedRef.current) {
+        finalState = 'cancelled'
+        return
+      }
+      const message = error instanceof Error ? error.message : String(error)
+      // ipcRenderer.invoke prefixes "Error invoking remote method 'export:run': Error: ".
+      setExportError({
+        message: `Export failed: ${message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '')}`,
+        missing: false
+      })
     } finally {
-      setExportProgress(null)
+      isGeneratingRef.current = false
+      setIsGenerating(false)
+      setExportProgress((panel) => finishPanel(panel, finalState))
     }
   }
 
+  const cancelExport = (): void => {
+    cancelRequestedRef.current = true
+    void window.api.export.cancel()
+  }
+
   return (
-    <div className={collapsed ? 'app app--collapsed' : 'app'}>
-      <nav className="sidebar" aria-label="Main">
-        <div className="brand">
-          <BrandMark />
-          <span className="brand__name">Reelszer</span>
-        </div>
-        {NAV.map((item) => (
+    <div className="shell">
+      <TitleBar />
+        <div className={collapsed ? 'app app--collapsed' : 'app'}>
+        <nav className="sidebar" aria-label="Main">
+          <div className="brand">
+            <BrandMark />
+            <span className="brand__name">Reelszer</span>
+          </div>
+          {NAV.map((item) => (
           <button
             key={item.id}
             type="button"
@@ -160,7 +308,7 @@ export default function App() {
             <span className="nav-item__label">{item.label}</span>
           </button>
         ))}
-        <button
+          <button
           type="button"
           className="nav-item sidebar__toggle"
           data-tooltip="Expand sidebar"
@@ -171,70 +319,105 @@ export default function App() {
           <Icon name="chevron" size={20} />
           <span className="nav-item__label">Collapse</span>
         </button>
-      </nav>
+        </nav>
 
-      <main className="main">
-        {page === 'editor' && (
-          <EditorPage
-            editor={editor}
-            sources={sources}
-            photoFolder={photoFolder}
-            presets={presets}
-            music={music}
-            isGenerating={isGenerating}
-            onPickPhotoFolder={async () => {
-              try {
-                setPhotoFolder(await window.api.photos.chooseFolder())
-              } catch (error) {
-                console.error('Unable to choose photo folder', error)
-              }
-            }}
-            onImportVideos={async () => {
-              try {
-                const imported = await window.api.videos.import()
-                setSources((prev) => [...prev, ...imported])
-              } catch (error) {
-                console.error('Unable to import videos', error)
-              }
-            }}
-            onRemoveSource={(id) => setSources((prev) => prev.filter((s) => s.id !== id))}
-            onAddPreset={(text) =>
-              setPresets((prev) => [...prev, { id: crypto.randomUUID(), text }])
-            }
-            onDeletePreset={(id) => setPresets((prev) => prev.filter((p) => p.id !== id))}
-            onImportMusic={async () => {
+        <main className="main">
+          {page === 'editor' && (
+            <EditorPage
+              editor={editor}
+              sources={sources}
+              flashImages={flashImages}
+              flashNotice={flashNotice}
+              presets={presets}
+              music={music}
+              isGenerating={isGenerating}
+              missingPaths={missingPaths}
+              exportError={visibleExportError}
+              onPickFlashImages={async () => {
+                try {
+                  const selection = await window.api.photos.choose()
+                  if (!selection) return
+                  // Picks are added to the current images; already-picked files are skipped.
+                  const existing = new Set(flashImages.map((image) => image.path))
+                  const fresh = selection.images.filter((image) => !existing.has(image.path))
+                  const added = fresh.slice(0, Math.max(0, MAX_FLASH_IMAGES - flashImages.length))
+                  const duplicates = selection.images.length - fresh.length
+                  setFlashImages([...flashImages, ...added])
+                  setFlashNotice(
+                    selection.pickedCount - duplicates > added.length
+                      ? `The limit is ${MAX_FLASH_IMAGES} images, so ${selection.pickedCount - duplicates - added.length} weren't added. Remove one to add another.`
+                      : null
+                  )
+                } catch (error) {
+                  console.error('Unable to choose flash images', error)
+                }
+              }}
+              onRemoveFlashImage={(id) => {
+                // Only removed from the app; the file stays on disk.
+                setFlashImages((prev) => prev.filter((image) => image.id !== id))
+                setFlashNotice(null)
+              }}
+              onImportVideos={async () => {
+                try {
+                  const imported = await window.api.videos.import()
+                  setSources((prev) => [...prev, ...imported])
+                } catch (error) {
+                  console.error('Unable to import videos', error)
+                }
+              }}
+              onRemoveSource={(id) => setSources((prev) => prev.filter((s) => s.id !== id))}
+              onAddPreset={(text) =>
+                setPresets((prev) => [...prev, { id: crypto.randomUUID(), text }])
+              onDeletePreset={(id) => setPresets((prev) => prev.filter((p) => p.id !== id))}
+               onImportMusic={async () => {
               try {
                 const imported = await window.api.music.import()
                 setMusic((prev) => [...prev, ...imported])
               } catch (error) {
                 console.error('Unable to import music', error)
+              
               }
-            }}
-            onRemoveMusic={(id) => setMusic((prev) => prev.filter((m) => m.id !== id))}
-            onGenerate={generateVideos}
-            onCancelExport={() => {
-              void window.api.export.cancel()
-            }}
-          />
-        )}
-        {page === 'downloader' && (
-          <DownloaderPage
-            history={downloads}
-            onDownloadSingle={(url) => addDownloads([url], 'single')}
-            onDownloadBatch={(urls) => addDownloads(urls, 'batch')}
-            onShowInFolder={(id) => void window.api.downloads.show(id)}
-            onRetry={(id) => void window.api.downloads.retry(id)}
-            onCancel={(id) => void window.api.downloads.cancel(id)}
-            folder={downloadFolder}
-            onChooseFolder={async () => {
-              const folder = await window.api.downloads.chooseFolder()
-              if (folder) setDownloadFolder(folder)
-            }}
-            onRemoveMany={removeDownloads}
-          />
-        )}
-        {page === 'library' && <LibraryPage videos={sources} />}
-      </main>
+              onDeletePreset={(id) => setPresets((prev) => prev.filter((p) => p.id !== id))}
+              onImportMusic={async () => {
+                try {
+                  const imported = await window.api.music.import()
+                  setMusic((prev) => [...prev, ...imported])
+                } catch (error) {
+                  console.error('Unable to import music', error)
+                }
+              }}
+              onRemoveMusic={(id) => setMusic((prev) => prev.filter((m) => m.id !== id))}
+              onGenerate={generateVideos}
+              onCancelExport={cancelExport}
+            />
+          )}
+          {page === 'downloader' && (
+            <DownloaderPage
+              history={downloads}
+              onDownloadSingle={(url) => addDownloads([url], 'single')}
+              onDownloadBatch={(urls) => addDownloads(urls, 'batch')}
+              onShowInFolder={(id) => void window.api.downloads.show(id)}
+              onRetry={(id) => void window.api.downloads.retry(id)}
+              onCancel={(id) => void window.api.downloads.cancel(id)}
+              folder={downloadFolder}
+              onChooseFolder={async () => {
+                const folder = await window.api.downloads.chooseFolder()
+                if (folder) setDownloadFolder(folder)
+              }}
+              onRemoveMany={removeDownloads}
+            />
+          )}
+          {page === 'library' && <LibraryPage videos={sources} />}
+        </main>
+      </div>
+      {exportProgress && (
+        <ExportProgressPanel
+          progress={exportProgress}
+          onCancel={cancelExport}
+          onClose={() => setExportProgress(null)}
+          onShowFile={(filePath) => void window.api.export.show(filePath)}
+        />
+      )}
     </div>
   )
 }

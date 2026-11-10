@@ -1,7 +1,7 @@
 import { Navbar } from '../../components/Navbar'
 import { Button } from '../../components/ui'
 import { pluralize } from '../../lib/format'
-import type { CaptionPreset, MusicTrack, PhotoFolder, SourceVideo } from '@renderer/types'
+import type { CaptionPreset, FlashImage, MusicTrack, SourceVideo } from '@renderer/types'
 import { QUALITY_OPTIONS } from './config'
 import { MediaColumn } from './MediaColumn'
 import { PreviewColumn } from './PreviewColumn'
@@ -11,11 +11,17 @@ import type { EditorApi } from './useEditorSettings'
 export interface EditorPageProps {
   editor: EditorApi
   sources: readonly SourceVideo[]
-  photoFolder: PhotoFolder | null
+  flashImages: readonly FlashImage[]
+  /** Shown when some picked images were dropped by the limit. */
+  flashNotice: string | null
   presets: readonly CaptionPreset[]
   music: readonly MusicTrack[]
   isGenerating: boolean
-  onPickPhotoFolder: () => void
+  /** Referenced paths that no longer exist on disk. */
+  missingPaths: ReadonlySet<string>
+  exportError: string | null
+  onPickFlashImages: () => void
+  onRemoveFlashImage: (id: string) => void
   onImportVideos: () => void
   onRemoveSource: (id: string) => void
   onAddPreset: (text: string) => void
@@ -29,11 +35,15 @@ export interface EditorPageProps {
 export function EditorPage({
   editor,
   sources,
-  photoFolder,
+  flashImages,
+  flashNotice,
   presets,
   music,
   isGenerating,
-  onPickPhotoFolder,
+  missingPaths,
+  exportError,
+  onPickFlashImages,
+  onRemoveFlashImage,
   onImportVideos,
   onRemoveSource,
   onAddPreset,
@@ -53,6 +63,7 @@ export function EditorPage({
   const activeMusic = music.find((m) => m.id === activeSourceSettings.audio.musicId) ?? null
 
   const canGenerate = sources.length > 0 && !isGenerating
+  const totalOutputs = sources.length * settings.copies
   const qualityLabel = QUALITY_OPTIONS.find((q) => q.value === settings.quality)?.label ?? ''
 
   return (
@@ -61,12 +72,15 @@ export function EditorPage({
       <div className="page page--editor">
         <div className="editor__columns">
           <MediaColumn
-            photoFolder={photoFolder}
+            flashImages={flashImages}
+            flashNotice={flashNotice}
+            missingPaths={missingPaths}
             sources={sources}
             activeSourceId={activeSource?.id ?? null}
             presets={presets}
             activePresetId={activePreset?.id ?? null}
-            onPickPhotoFolder={onPickPhotoFolder}
+            onPickFlashImages={onPickFlashImages}
+            onRemoveFlashImage={onRemoveFlashImage}
             onImportVideos={onImportVideos}
             onSelectSource={actions.setActiveSource}
             onRemoveSource={onRemoveSource}
@@ -78,6 +92,7 @@ export function EditorPage({
           />
           <PreviewColumn
             source={activeSource}
+            missing={activeSource ? missingPaths.has(activeSource.sourcePath) : false}
             caption={activePreset?.text ?? ''}
             settings={activeSourceSettings}
             music={activeMusic}
@@ -86,6 +101,7 @@ export function EditorPage({
             editor={editor}
             sourceId={activeSource?.id ?? null}
             music={music}
+            missingPaths={missingPaths}
             activeMusicId={activeSourceSettings.audio.musicId}
             onImportMusic={onImportMusic}
             onRemoveMusic={onRemoveMusic}
@@ -96,7 +112,19 @@ export function EditorPage({
           <dl className="generate-bar__summary">
             <div>
               <dt>Videos</dt>
-              <dd>{pluralize(sources.length, 'video')}</dd>
+              <dd>
+                {pluralize(totalOutputs, 'video')}
+                {settings.copies > 1 && sources.length > 0 && (
+                  <span className="muted">
+                    {' '}
+                    ({sources.length} × {settings.copies})
+                  </span>
+                )}
+              </dd>
+            </div>
+            <div>
+              <dt>Edits</dt>
+              <dd>{settings.fullRandomize ? 'Randomized' : 'Manual'}</dd>
             </div>
             <div>
               <dt>Quality</dt>
@@ -122,6 +150,11 @@ export function EditorPage({
             <Button size="lg" variant="ghost" onClick={onCancelExport}>
               Cancel
             </Button>
+          )}
+          {exportError && (
+            <p className="generate-bar__error" role="alert">
+              {exportError}
+            </p>
           )}
           {sources.length === 0 && (
             <span id="generate-hint" className="sr-only">

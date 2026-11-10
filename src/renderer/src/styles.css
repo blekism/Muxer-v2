@@ -149,6 +149,40 @@ button {
 /* ========================================================================== */
 /* App shell                                                                  */
 /* ========================================================================== */
+.shell {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+/* Custom title bar; the OS draws min/max/close on the right via titleBarOverlay. */
+.titlebar {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--space-2);
+  height: 32px;
+  padding: 0 calc(100vw - env(titlebar-area-width, calc(100vw - 140px))) 0 var(--space-3);
+  background: var(--chrome);
+  border-bottom: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 500;
+  -webkit-app-region: drag;
+}
+.titlebar__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 8px var(--accent);
+}
+.titlebar button,
+.titlebar a,
+.titlebar input {
+  -webkit-app-region: no-drag;
+}
+
 .app {
   --sidebar-w: 200px;
   display: grid;
@@ -485,6 +519,27 @@ select.input {
   color: var(--text-muted);
   font-size: 12px;
 }
+.field-hint {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+.copies-field {
+  margin-top: var(--space-3);
+}
+.copies-field .input {
+  width: 96px;
+}
+.checkbox-field {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  cursor: pointer;
+}
+.checkbox-field input {
+  margin: 0;
+  accent-color: var(--accent);
+}
 .field-error {
   margin-top: 4px;
   color: var(--danger);
@@ -533,6 +588,13 @@ select.input {
   border: 2px solid var(--accent);
   border-radius: 50%;
   background: var(--text);
+}
+
+.slider--disabled {
+  opacity: 0.45;
+}
+.slider--disabled input[type='range'] {
+  cursor: not-allowed;
 }
 
 /* Segmented control */
@@ -748,6 +810,23 @@ select.input {
   width: 100%;
   aspect-ratio: 1;
 }
+.thumb-grid__item {
+  position: relative;
+}
+/* Always visible (not hover-only) so it also works by keyboard and touch. */
+.thumb-grid__remove.icon-btn {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 20px;
+  height: 20px;
+  background: rgb(0 0 0 / 0.6);
+  color: #fff;
+}
+.thumb-grid__remove.icon-btn:hover {
+  background: var(--danger);
+  color: #fff;
+}
 
 .source-list {
   display: flex;
@@ -917,6 +996,27 @@ select.input {
   text-overflow: ellipsis;
   white-space: nowrap;
   font-weight: 500;
+}
+
+.generate-bar__error {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  color: var(--danger);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+/* Referenced file deleted or moved on disk */
+.missing-label {
+  color: var(--danger);
+  font-weight: 500;
+}
+.thumb-grid__item--missing,
+.source--missing .source__thumb,
+.source--missing .source__text > .truncate,
+.radio-list__item--missing .radio-list__text > .truncate {
+  opacity: 0.55;
 }
 
 /* ========================================================================== */
@@ -1188,6 +1288,115 @@ select.input {
   font-size: 11px;
 }
 .media-card__meta dd {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ========================================================================== */
+/* Export progress box (bottom right, above the Generate bar)                 */
+/* ========================================================================== */
+.export-panel {
+  position: fixed;
+  right: var(--space-4);
+  /* Clears the editor's Generate bar so its buttons and errors stay visible. */
+  bottom: 88px;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  width: min(360px, calc(100vw - 2 * var(--space-4)));
+  overflow: hidden;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 12px 32px rgb(0 0 0 / 0.55);
+}
+.export-panel__head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-2) var(--space-2) var(--space-3);
+  background: var(--chrome);
+}
+.export-panel__title {
+  flex: 1;
+  min-width: 0;
+  font-weight: 600;
+}
+.export-panel__toggle .icon {
+  transform: rotate(90deg);
+  transition: transform 0.15s;
+}
+.export-panel__toggle--collapsed .icon {
+  transform: rotate(-90deg);
+}
+.export-panel__overall {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-2) var(--space-2) var(--space-3);
+  background: var(--chrome);
+}
+.export-panel__overall .progress {
+  flex: 1;
+  max-width: none;
+  margin-top: 0;
+}
+.export-panel__list {
+  max-height: 264px;
+  margin: 0;
+  padding: var(--space-1) 0;
+  overflow-y: auto;
+  list-style: none;
+  border-top: 1px solid var(--border);
+}
+.export-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 44px;
+  padding: 6px var(--space-3);
+}
+.export-row__icon {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--surface-2);
+  color: var(--text-faint);
+}
+.export-row--rendering .export-row__icon {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.export-row--done .export-row__icon {
+  background: color-mix(in srgb, var(--success) 18%, transparent);
+  color: var(--success);
+}
+.export-row--failed .export-row__icon {
+  background: color-mix(in srgb, var(--danger) 18%, transparent);
+  color: var(--danger);
+}
+.export-row__body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+.export-row__body .progress {
+  max-width: none;
+}
+.export-row--queued .export-row__name {
+  color: var(--text-muted);
+}
+.export-row__error {
+  color: var(--danger);
+  font-size: 11px;
+}
+.export-row__meta {
+  flex: none;
+  color: var(--text-faint);
   font-size: 12px;
   font-variant-numeric: tabular-nums;
 }
