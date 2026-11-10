@@ -80,6 +80,7 @@ export function EditorPage({
             source={activeSource}
             caption={activePreset?.text ?? ''}
             settings={activeSourceSettings}
+            music={activeMusic}
           />
           <SettingsColumn
             editor={editor}

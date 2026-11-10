@@ -50,7 +50,9 @@ async function loadLibrary(): Promise<SavedEditorLibrary> {
     const saved = JSON.parse(raw) as Partial<SavedEditorLibrary>
     return {
       presets: Array.isArray(saved.presets) ? saved.presets : [],
-      music: Array.isArray(saved.music) ? saved.music : []
+      music: Array.isArray(saved.music)
+        ? saved.music.map((track) => ({ ...track, previewUrl: createMediaUrl(track.sourcePath) }))
+        : []
     }
   } catch {
     return emptyLibrary
@@ -58,7 +60,9 @@ async function loadLibrary(): Promise<SavedEditorLibrary> {
 }
 
 async function saveLibrary(library: SavedEditorLibrary): Promise<void> {
-  await writeFile(libraryFilePath(), JSON.stringify(library, null, 2), 'utf8')
+  // previewUrl ids are minted per session, so they are not persisted.
+  const music = library.music.map(({ previewUrl: _previewUrl, ...track }) => track)
+  await writeFile(libraryFilePath(), JSON.stringify({ ...library, music }, null, 2), 'utf8')
 }
 
 function mediaContentType(filePath: string): string {
@@ -72,6 +76,18 @@ function mediaContentType(filePath: string): string {
       return 'image/webp'
     case '.gif':
       return 'image/gif'
+    case '.mp3':
+      return 'audio/mpeg'
+    case '.wav':
+      return 'audio/wav'
+    case '.m4a':
+      return 'audio/mp4'
+    case '.aac':
+      return 'audio/aac'
+    case '.ogg':
+      return 'audio/ogg'
+    case '.flac':
+      return 'audio/flac'
     default:
       return 'video/mp4'
   }
@@ -189,7 +205,8 @@ async function importMusic(): Promise<MusicTrack[]> {
         id: crypto.randomUUID(),
         name: basename(filePath),
         sourcePath: filePath,
-        durationSec: Number(probe.format?.duration ?? 0)
+        durationSec: Number(probe.format?.duration ?? 0),
+        previewUrl: createMediaUrl(filePath)
       }
     })
   )

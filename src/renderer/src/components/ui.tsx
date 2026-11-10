@@ -82,6 +82,24 @@ export function Icon({ name, size = 16 }: { name: IconName; size?: number }) {
   )
 }
 
+/** App logo mark: a rounded square with a play triangle. */
+export function BrandMark({ size = 24 }: { size?: number }) {
+  return (
+    <svg
+      className="icon brand__mark"
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <rect x="2" y="2" width="20" height="20" rx="6" fill="var(--accent)" />
+      <path d="M10 8l6 4-6 4z" fill="var(--accent-contrast)" />
+    </svg>
+  )
+}
+
 /* --------------------------------- Buttons -------------------------------- */
 
 interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {

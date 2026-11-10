@@ -131,8 +131,22 @@ function BatchDownload({ onSubmit }: { onSubmit: (urls: string[]) => void }) {
     setText('')
   }
 
+  const status =
+    text.trim() === ''
+      ? 'No links yet'
+      : invalid > 0
+        ? `${pluralize(valid.length, 'link')} ready, ${invalid} skipped`
+        : `${pluralize(valid.length, 'link')} ready`
+
   return (
-    <Panel title="Multiple links">
+    <Panel
+      title="Multiple links"
+      actions={
+        <p className="muted" aria-live="polite">
+          {status}
+        </p>
+      }
+    >
       <form className="dl-form dl-form--batch" onSubmit={handleSubmit}>
         <div className="dl-form__field">
           <label className="sr-only" htmlFor={inputId}>
@@ -147,18 +161,11 @@ function BatchDownload({ onSubmit }: { onSubmit: (urls: string[]) => void }) {
             onChange={(e) => setText(e.target.value)}
           />
         </div>
-        <div className="dl-form__side">
-          <p className="muted" aria-live="polite">
-            {text.trim() === ''
-              ? 'No links yet'
-              : invalid > 0
-                ? `${pluralize(valid.length, 'link')} ready, ${invalid} skipped`
-                : `${pluralize(valid.length, 'link')} ready`}
-          </p>
-          <Button type="submit" variant="primary" icon="download" disabled={valid.length === 0}>
-            Download all
-          </Button>
-        </div>
+        {/* <div className="dl-form__side"> */}
+        <Button type="submit" variant="primary" icon="download" disabled={valid.length === 0}>
+          Download all
+        </Button>
+        {/* </div> */}
       </form>
     </Panel>
   )
@@ -457,6 +464,7 @@ function BatchGroup({
             <span className={`badge ${status.className}`}>{status.text}</span>
           </div>
           <span className="muted">{totalBytes > 0 ? formatBytes(totalBytes) : '—'}</span>
+          <span className="muted">•</span>
           <span className="muted">{formatRelativeTime(createdAt)}</span>
         </div>
         <div className="history__actions">
@@ -540,6 +548,7 @@ function HistoryRow({
           </span>
         </div>
         <span className="muted">{item.sizeBytes ? formatBytes(item.sizeBytes) : '—'}</span>
+        <span className="muted">•</span>
         <span className="muted">{formatRelativeTime(item.createdAt)}</span>
       </div>
       <div className="history__actions">

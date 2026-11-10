@@ -33,7 +33,7 @@
   --space-1: 4px;
   --space-2: 8px;
   --space-3: 12px;
-  --space-4: 16px;
+  --space-4: 18px;
 
   --font-ui:
     'Segoe UI Variable Text', 'Segoe UI', system-ui, -apple-system, 'Helvetica Neue', sans-serif;
@@ -150,32 +150,69 @@ button {
 /* App shell                                                                  */
 /* ========================================================================== */
 .app {
+  --sidebar-w: 200px;
   display: grid;
-  grid-template-columns: 80px minmax(0, 1fr);
+  grid-template-columns: var(--sidebar-w) minmax(0, 1fr);
   height: 100%;
+  transition: grid-template-columns 0.2s ease;
+}
+.app--collapsed {
+  --sidebar-w: 64px;
 }
 
+/* Icons keep the same x-position in both states (10px padding + 12px item padding), so only
+   the labels animate. No overflow clipping here: the collapsed tooltips extend past the edge. */
 .sidebar {
   display: flex;
   flex-direction: column;
   gap: var(--space-1);
-  padding: var(--space-3) var(--space-2);
+  min-width: 0;
+  padding: var(--space-3) 10px;
   background: var(--chrome);
   border-right: 1px solid var(--border);
 }
 
-.nav-item {
+.brand {
   display: flex;
-  flex-direction: column;
   align-items: center;
-  gap: 4px;
-  padding: 10px 4px;
+  gap: 10px;
+  margin-bottom: var(--space-2);
+  padding: 0 10px 14px;
+  border-bottom: 1px solid var(--border);
+}
+.brand__name,
+.nav-item__label {
+  overflow: hidden;
+  max-width: 140px;
+  white-space: nowrap;
+  transition:
+    max-width 0.2s ease,
+    opacity 0.15s ease;
+}
+.brand__name {
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+.app--collapsed .brand__name,
+.app--collapsed .nav-item__label {
+  max-width: 0;
+  opacity: 0;
+}
+
+.nav-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
   border: 0;
   border-radius: var(--radius);
   background: transparent;
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 500;
+  text-align: left;
   transition:
     background-color 0.12s,
     color 0.12s;
@@ -186,8 +223,46 @@ button {
 }
 .nav-item[aria-current='page'] {
   background: var(--accent-soft);
-  box-shadow: inset 2px 0 0 var(--accent);
+  box-shadow: inset 0 0 0 1px rgb(61 220 255 / 0.25);
   color: var(--accent);
+}
+.sidebar__toggle {
+  margin-top: auto;
+}
+.sidebar__toggle .icon {
+  transform: rotate(180deg);
+  transition: transform 0.2s ease;
+}
+.app--collapsed .sidebar__toggle .icon {
+  transform: none;
+}
+
+/* Tooltips show only while collapsed, beside the icon. */
+.app--collapsed .nav-item::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  left: calc(100% + 12px);
+  top: 50%;
+  z-index: 20;
+  padding: 5px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transform: translate(-4px, -50%);
+  transition:
+    opacity 0.12s ease,
+    transform 0.12s ease;
+}
+.app--collapsed .nav-item:hover::after,
+.app--collapsed .nav-item:focus-visible::after {
+  opacity: 1;
+  transform: translate(0, -50%);
 }
 
 .main {
@@ -218,7 +293,7 @@ button {
 .page {
   display: grid;
   flex: 1;
-  gap: var(--space-3);
+  gap: var(--space-4);
   min-height: 0;
   padding: var(--space-4);
 }
@@ -250,6 +325,11 @@ button {
 .panel__title {
   font-size: 13px;
   font-weight: 600;
+}
+
+.panel__subTitle {
+  font-size: 13px;
+  font-weight: 400;
 }
 
 .panel__actions {
@@ -622,14 +702,14 @@ select.input {
 .editor__columns {
   display: grid;
   grid-template-columns: minmax(250px, 300px) minmax(0, 1fr) minmax(300px, 340px);
-  gap: var(--space-3);
+  gap: var(--space-4);
   min-height: 0;
 }
 
 .editor__col {
   display: flex;
   flex-direction: column;
-  gap: var(--space-3);
+  gap: var(--space-4);
   min-width: 0;
   min-height: 0;
 }
@@ -849,7 +929,7 @@ select.input {
 .downloader__top {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: var(--space-3);
+  gap: var(--space-4);
   min-height: 0;
 }
 .dl-form {
@@ -871,7 +951,7 @@ select.input {
   display: flex;
   flex-direction: column;
   align-items: flex-end;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: var(--space-2);
 }
 
@@ -884,9 +964,10 @@ select.input {
   display: grid;
   grid-template-columns: 16px 40px minmax(0, 1fr) 150px auto;
   align-items: center;
-  gap: var(--space-3);
-  padding: 10px 0;
+  gap: 20px;
+  padding: 10px;
   border-bottom: 1px solid var(--border);
+  margin-right: var(--space-3);
 }
 .history__item:last-child {
   border-bottom: 0;
@@ -997,18 +1078,22 @@ select.input {
 }
 .history__meta {
   display: flex;
-  flex-direction: column;
+  flex-wrap: wrap;
   align-items: flex-start;
-  gap: 2px;
+  justify-content: flex-start;
+  align-content: flex-start;
+  gap: 4px var(--space-2);
 }
 .history__badges {
   display: flex;
+  flex-basis: 100%;
+  justify-content: flex-start;
   gap: 4px;
-  margin-bottom: 2px;
 }
 .history__actions {
   display: flex;
   gap: 2px;
+  margin-left: calc(var(--space-2) * -1);
 }
 
 .badge {
