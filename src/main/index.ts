@@ -325,7 +325,7 @@ app.whenReady().then(() => {
     return new Response(openStream({ start, end }), { status: 206, headers })
   })
   // Set app user model id for windows
-  electronApp.setAppUserModelId('com.electron')
+  electronApp.setAppUserModelId('com.reelszer.app')
 
   // Default open or close DevTools by F12 in development
   // and ignore CommandOrControl + R in production.
