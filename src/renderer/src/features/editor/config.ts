@@ -3,10 +3,12 @@ import type {
   EditorSettings,
   ExportQuality,
   SourceEditSettings,
+  TextCase,
   TextStyle,
   VideoProps
 } from '../../types'
 import { MAX_COPIES, MIN_COPIES } from '../../../../shared/exportConstants'
+import { DEFAULT_FONT_ID, getFont } from '../../../../shared/fonts'
 import {
   TEMPERATURE_KELVIN,
   TEMPERATURE_MIX,
@@ -14,19 +16,11 @@ import {
   VIGNETTE_MAX_ANGLE
 } from '../../../../shared/colorConstants'
 
-/** These families must be installed or bundled with the app (and FFmpeg needs the font files too). */
-export const FONT_OPTIONS = [
-  'Montserrat',
-  'Poppins',
-  'Inter',
-  'Oswald',
-  'Anton',
-  'Bebas Neue',
-  'Roboto',
-  'Arial Black'
-] as const
-
-export const fontStack = (font: string) => `"${font}", system-ui, sans-serif`
+/** CSS for a font id; the font files are shared with the FFmpeg export (see shared/fonts.ts). */
+export const fontStyle = (id: string): { fontFamily: string; fontWeight: number } => {
+  const font = getFont(id)
+  return { fontFamily: `"${font.family}", system-ui, sans-serif`, fontWeight: font.weight }
+}
 
 export const TEXT_SWATCHES = [
   '#ffffff',
@@ -176,8 +170,15 @@ export const VIDEO_CONTROLS: readonly VideoControl[] = [
   }
 ]
 
+export const TEXT_CASE_OPTIONS: readonly { value: TextCase; label: string }[] = [
+  { value: 'none', label: 'As typed' },
+  { value: 'upper', label: 'UPPERCASE' },
+  { value: 'lower', label: 'lowercase' }
+]
+
 export const DEFAULT_TEXT: TextStyle = {
-  font: 'Montserrat',
+  font: DEFAULT_FONT_ID,
+  textCase: 'none',
   size: 56,
   outline: 4,
   fill: '#ffffff',

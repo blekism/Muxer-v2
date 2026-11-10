@@ -13,9 +13,10 @@ import type {
 } from '../shared/types'
 import { TEMPERATURE_KELVIN, TEMPERATURE_MIX } from '../shared/colorConstants'
 import { clampCopies } from '../shared/exportConstants'
+import { applyTextCase } from '../shared/fonts'
 import { MAX_FLASH_IMAGES } from '../shared/flashConstants'
 import { pathExists } from './fileWatch'
-import { ffmpegPath, ffprobePath } from './utils/ffpaths'
+import { ffmpegPath, ffprobePath, fontFilePath } from './utils/ffpaths'
 
 const runFile = promisify(execFile)
 const FLASH_FRAMES = 3
@@ -77,10 +78,6 @@ const OUTPUT_COLOR_ARGS = [
   '-color_range',
   'tv'
 ]
-
-function escapeFilterValue(value: string): string {
-  return value.replace(/\\/g, '\\\\').replace(/:/g, '\\:').replace(/'/g, "\\'")
-}
 
 function escapeFilterPath(filePath: string): string {
   return filePath.replace(/\\/g, '/').replace(/:/g, '\\:').replace(/'/g, "\\'")
@@ -204,7 +201,7 @@ function buildFilters(
   if (caption) {
     if (!captionPath) throw new Error('Caption path is required when caption text is present')
     filters.push(
-      `${previousLabel}drawtext=textfile='${escapeFilterPath(captionPath)}':font='${escapeFilterValue(settings.text.font)}':fontsize=${fontSize}:fontcolor=${settings.text.fill}:bordercolor=${settings.text.outlineColor}:borderw=${outlineWidth}:x=${settings.text.hAlign === 'left' ? 'w*0.06' : settings.text.hAlign === 'right' ? 'w-text_w-w*0.06' : '(w-text_w)/2'}:y=${settings.text.vAlign === 'top' ? 'h*0.06' : settings.text.vAlign === 'bottom' ? 'h-text_h-h*0.06' : '(h-text_h)/2'}[captioned]`
+      `${previousLabel}drawtext=textfile='${escapeFilterPath(captionPath)}':fontfile='${escapeFilterPath(fontFilePath(settings.text.font))}':fontsize=${fontSize}:fontcolor=${settings.text.fill}:bordercolor=${settings.text.outlineColor}:borderw=${outlineWidth}:x=${settings.text.hAlign === 'left' ? 'w*0.06' : settings.text.hAlign === 'right' ? 'w-text_w-w*0.06' : '(w-text_w)/2'}:y=${settings.text.vAlign === 'top' ? 'h*0.06' : settings.text.vAlign === 'bottom' ? 'h-text_h-h*0.06' : '(h-text_h)/2'}[captioned]`
     )
     return { filters, finalLabel: '[captioned]', starts }
   }
@@ -234,7 +231,7 @@ async function renderSource(
 
   const output = outputDimensions(OUTPUT_WIDTHS[request.quality])
   const preset = request.presets.find((item) => item.id === settings.captionPresetId)
-  const caption = preset?.text ?? ''
+  const caption = applyTextCase(preset?.text ?? '', settings.text.textCase)
   const captionPath = caption
     ? join(process.env.TEMP ?? process.env.TMP ?? '.', `rstudio-caption-${crypto.randomUUID()}.txt`)
     : null
