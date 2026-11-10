@@ -1,6 +1,8 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
 import type {
+  DownloadItem,
+  DownloadMode,
   ExportProgress,
   ExportRequest,
   ExportResult,
@@ -35,6 +37,24 @@ const api = {
         listener(progress)
       ipcRenderer.on('export:progress', handler)
       return () => ipcRenderer.removeListener('export:progress', handler)
+    }
+  },
+  downloads: {
+    list: (): Promise<DownloadItem[]> => ipcRenderer.invoke('downloads:list'),
+    start: (urls: string[], mode: DownloadMode): Promise<void> =>
+      ipcRenderer.invoke('downloads:start', urls, mode),
+    retry: (id: string): Promise<void> => ipcRenderer.invoke('downloads:retry', id),
+    cancel: (id: string): Promise<void> => ipcRenderer.invoke('downloads:cancel', id),
+    removeMany: (ids: string[]): Promise<boolean> =>
+      ipcRenderer.invoke('downloads:remove-many', ids),
+    show: (id: string): Promise<void> => ipcRenderer.invoke('downloads:show', id),
+    getFolder: (): Promise<string> => ipcRenderer.invoke('downloads:get-folder'),
+    chooseFolder: (): Promise<string | null> => ipcRenderer.invoke('downloads:choose-folder'),
+    onUpdate: (listener: (item: DownloadItem) => void): (() => void) => {
+      const handler = (_event: Electron.IpcRendererEvent, item: DownloadItem): void =>
+        listener(item)
+      ipcRenderer.on('downloads:update', handler)
+      return () => ipcRenderer.removeListener('downloads:update', handler)
     }
   }
 }

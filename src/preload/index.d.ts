@@ -1,5 +1,7 @@
 import { ElectronAPI } from '@electron-toolkit/preload'
 import type {
+  DownloadItem,
+  DownloadMode,
   ExportProgress,
   ExportRequest,
   ExportResult,
@@ -27,6 +29,17 @@ interface AppApi {
     run: (request: ExportRequest) => Promise<ExportResult | null>
     cancel: () => Promise<void>
     onProgress: (listener: (progress: ExportProgress) => void) => () => void
+  }
+  downloads: {
+    list: () => Promise<DownloadItem[]>
+    start: (urls: string[], mode: DownloadMode) => Promise<void>
+    retry: (id: string) => Promise<void>
+    cancel: (id: string) => Promise<void>
+    removeMany: (ids: string[]) => Promise<boolean>
+    show: (id: string) => Promise<void>
+    getFolder: () => Promise<string>
+    chooseFolder: () => Promise<string | null>
+    onUpdate: (listener: (item: DownloadItem) => void) => () => void
   }
 }
 

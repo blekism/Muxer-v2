@@ -9,12 +9,25 @@ import { promisify } from 'node:util'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import type {
+  DownloadMode,
   ExportRequest,
   MusicTrack,
   PhotoFolder,
   SavedEditorLibrary,
   SourceVideo
 } from '../shared/types'
+import {
+  autoUpdateYtDlp,
+  cancelDownload,
+  chooseDownloadFolder,
+  getDownloadFolder,
+  initDownloads,
+  listDownloads,
+  removeDownloads,
+  retryDownload,
+  showDownload,
+  startDownloads
+} from './download'
 import { exportVideos } from './export'
 import { ffprobePath } from './utils/ffpaths'
 import { testFFmpeg } from './utils/test-ffpaths'
@@ -323,6 +336,21 @@ app.whenReady().then(() => {
   ipcMain.handle('export:cancel', () => {
     activeExportController?.abort()
   })
+
+  initDownloads(createMediaUrl)
+  void autoUpdateYtDlp()
+  ipcMain.handle('downloads:list', listDownloads)
+  ipcMain.handle('downloads:start', (_event, urls: string[], mode: DownloadMode) =>
+    startDownloads(urls, mode)
+  )
+  ipcMain.handle('downloads:retry', (_event, id: string) => retryDownload(id))
+  ipcMain.handle('downloads:cancel', (_event, id: string) => cancelDownload(id))
+  ipcMain.handle('downloads:remove-many', (event, ids: string[]) =>
+    removeDownloads(ids, BrowserWindow.fromWebContents(event.sender))
+  )
+  ipcMain.handle('downloads:show', (_event, id: string) => showDownload(id))
+  ipcMain.handle('downloads:get-folder', getDownloadFolder)
+  ipcMain.handle('downloads:choose-folder', chooseDownloadFolder)
 
   createWindow()
 

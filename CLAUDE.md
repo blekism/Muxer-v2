@@ -24,7 +24,7 @@ Prettier style: single quotes, no semicolons, 100-column width, no trailing comm
 
 ## FFmpeg binaries
 
-`ffmpeg.exe` and `ffprobe.exe` must be in `resources/` (they're not committed). [src/main/utils/ffpaths.ts](src/main/utils/ffpaths.ts) resolves them from `resources/` in dev and from `process.resourcesPath` when packaged (`extraResources` in [electron-builder.yml](electron-builder.yml)). Only `.exe` paths are wired up, so the app currently runs on Windows only.
+`ffmpeg.exe`, `ffprobe.exe` and `yt-dlp.exe` (the official standalone build from the yt-dlp GitHub releases) must be in `resources/` (they're not committed). yt-dlp is copied to `userData/bin/` before it runs so it can update itself silently on startup (stable channel). [src/main/utils/ffpaths.ts](src/main/utils/ffpaths.ts) resolves them from `resources/` in dev and from `process.resourcesPath` when packaged (`extraResources` in [electron-builder.yml](electron-builder.yml)). Only `.exe` paths are wired up, so the app currently runs on Windows only.
 
 [src/spike2.mjs](src/spike2.mjs) is a standalone Node experiment script for FFmpeg randomization (it reads `FFMPEG_PATH`/`FFPROBE_PATH`). Several config constants are derived from it. Files ending in `old` (`exportold.ts`, `configold.ts`, `PreviewColumnold.tsx`, `SettingsColumnold.tsx`) are earlier versions that nothing imports.
 

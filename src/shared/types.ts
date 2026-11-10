@@ -88,3 +88,23 @@ export interface ExportProgress {
   total: number
   sourceName: string
 }
+
+export type DownloadStatus = 'queued' | 'downloading' | 'done' | 'failed'
+export type DownloadMode = 'single' | 'batch'
+
+export interface DownloadItem {
+  id: string
+  url: string
+  title: string
+  mode: DownloadMode
+  /** Shared by every item from one batch submission. */
+  batchId?: string
+  status: DownloadStatus
+  /** 0 to 100, only meaningful while downloading. */
+  progress: number
+  sizeBytes?: number
+  /** `media://` URL minted by main. */
+  thumbnailUrl?: string
+  error?: string
+  createdAt: number
+}

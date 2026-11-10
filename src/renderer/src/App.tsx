@@ -4,7 +4,6 @@ import { DownloaderPage } from './features/downloader/DownloaderPage'
 import { EditorPage } from './features/editor/EditorPage'
 import { useEditorSettings } from './features/editor/useEditorSettings'
 import { LibraryPage } from './features/library/LibraryPage'
-import { MOCK_DOWNLOADS } from './mock'
 import type { CaptionPreset, DownloadItem, MusicTrack, PhotoFolder, SourceVideo } from './types'
 import { ExportProgress } from 'src/shared/types'
 
@@ -27,10 +26,38 @@ export default function App() {
   const [music, setMusic] = useState<MusicTrack[]>([])
   const [libraryLoaded, setLibraryLoaded] = useState(false)
   const [exportProgress, setExportProgress] = useState<ExportProgress | null>(null)
-  const [downloads, setDownloads] = useState<DownloadItem[]>(MOCK_DOWNLOADS)
+  const [downloads, setDownloads] = useState<DownloadItem[]>([])
+  const [downloadFolder, setDownloadFolder] = useState('')
   const isGenerating = exportProgress !== null
 
   useEffect(() => window.api.export.onProgress(setExportProgress), [])
+
+  useEffect(() => {
+    const unsubscribe = window.api.downloads.onUpdate((item) =>
+      setDownloads((prev) => {
+        const index = prev.findIndex((d) => d.id === item.id)
+        // Append to match main's order; History sorts for display.
+        if (index === -1) return [...prev, item]
+        const next = prev.slice()
+        next[index] = item
+        return next
+      })
+    )
+    void window.api.downloads.list().then(setDownloads)
+    void window.api.downloads.getFolder().then(setDownloadFolder)
+    return unsubscribe
+  }, [])
+
+  const removeDownloads = async (ids: string[]): Promise<boolean> => {
+    try {
+      const removed = await window.api.downloads.removeMany(ids)
+      if (removed) setDownloads((prev) => prev.filter((d) => !ids.includes(d.id)))
+      return removed
+    } catch (error) {
+      console.error('Unable to delete downloads', error)
+      return false
+    }
+  }
 
   useEffect(() => {
     let disposed = false
@@ -61,18 +88,10 @@ export default function App() {
   }, [libraryLoaded, music, presets])
 
   const addDownloads = useCallback((urls: string[], mode: DownloadItem['mode']) => {
-    const createdAt = Date.now()
-    const items = urls.map<DownloadItem>((url) => ({
-      id: crypto.randomUUID(),
-      url,
-      title: 'Fetching details…',
-      mode,
-      status: 'queued',
-      progress: 0,
-      createdAt
-    }))
-    setDownloads((prev) => [...items, ...prev])
-    // TODO(ipc): window.api.downloads.start(urls) and update items from progress events.
+    // Main emits `downloads:update` for each new item, which adds it to the list.
+    void window.api.downloads.start(urls, mode).catch((error) => {
+      console.error('Unable to start downloads', error)
+    })
   }, [])
 
   const generateVideos = async () => {
@@ -165,15 +184,15 @@ export default function App() {
             history={downloads}
             onDownloadSingle={(url) => addDownloads([url], 'single')}
             onDownloadBatch={(urls) => addDownloads(urls, 'batch')}
-            onShowInFolder={() => {
-              /* TODO(ipc): shell.showItemInFolder(path) */
+            onShowInFolder={(id) => void window.api.downloads.show(id)}
+            onRetry={(id) => void window.api.downloads.retry(id)}
+            onCancel={(id) => void window.api.downloads.cancel(id)}
+            folder={downloadFolder}
+            onChooseFolder={async () => {
+              const folder = await window.api.downloads.chooseFolder()
+              if (folder) setDownloadFolder(folder)
             }}
-            onRetry={(id) =>
-              setDownloads((prev) =>
-                prev.map((d) => (d.id === id ? { ...d, status: 'queued', progress: 0 } : d))
-              )
-            }
-            onRemove={(id) => setDownloads((prev) => prev.filter((d) => d.id !== id))}
+            onRemoveMany={removeDownloads}
           />
         )}
         {page === 'library' && <LibraryPage videos={sources} />}

@@ -1,3 +1,4 @@
+import { Navbar } from '../../components/Navbar'
 import { Button } from '../../components/ui'
 import { pluralize } from '../../lib/format'
 import type { CaptionPreset, MusicTrack, PhotoFolder, SourceVideo } from '@renderer/types'
@@ -55,76 +56,79 @@ export function EditorPage({
   const qualityLabel = QUALITY_OPTIONS.find((q) => q.value === settings.quality)?.label ?? ''
 
   return (
-    <div className="page page--editor">
-      <div className="editor__columns">
-        <MediaColumn
-          photoFolder={photoFolder}
-          sources={sources}
-          activeSourceId={activeSource?.id ?? null}
-          presets={presets}
-          activePresetId={activePreset?.id ?? null}
-          onPickPhotoFolder={onPickPhotoFolder}
-          onImportVideos={onImportVideos}
-          onSelectSource={actions.setActiveSource}
-          onRemoveSource={onRemoveSource}
-          onSelectPreset={(id) => {
-            if (activeSource) actions.setCaptionPreset(activeSource.id, id)
-          }}
-          onAddPreset={onAddPreset}
-          onDeletePreset={onDeletePreset}
-        />
-        <PreviewColumn
-          source={activeSource}
-          caption={activePreset?.text ?? ''}
-          settings={activeSourceSettings}
-        />
-        <SettingsColumn
-          editor={editor}
-          sourceId={activeSource?.id ?? null}
-          music={music}
-          activeMusicId={activeSourceSettings.audio.musicId}
-          onImportMusic={onImportMusic}
-          onRemoveMusic={onRemoveMusic}
-        />
-      </div>
+    <>
+      <Navbar title="Editor" description="Where you edit videos" />
+      <div className="page page--editor">
+        <div className="editor__columns">
+          <MediaColumn
+            photoFolder={photoFolder}
+            sources={sources}
+            activeSourceId={activeSource?.id ?? null}
+            presets={presets}
+            activePresetId={activePreset?.id ?? null}
+            onPickPhotoFolder={onPickPhotoFolder}
+            onImportVideos={onImportVideos}
+            onSelectSource={actions.setActiveSource}
+            onRemoveSource={onRemoveSource}
+            onSelectPreset={(id) => {
+              if (activeSource) actions.setCaptionPreset(activeSource.id, id)
+            }}
+            onAddPreset={onAddPreset}
+            onDeletePreset={onDeletePreset}
+          />
+          <PreviewColumn
+            source={activeSource}
+            caption={activePreset?.text ?? ''}
+            settings={activeSourceSettings}
+          />
+          <SettingsColumn
+            editor={editor}
+            sourceId={activeSource?.id ?? null}
+            music={music}
+            activeMusicId={activeSourceSettings.audio.musicId}
+            onImportMusic={onImportMusic}
+            onRemoveMusic={onRemoveMusic}
+          />
+        </div>
 
-      <footer className="generate-bar">
-        <dl className="generate-bar__summary">
-          <div>
-            <dt>Videos</dt>
-            <dd>{pluralize(sources.length, 'video')}</dd>
-          </div>
-          <div>
-            <dt>Quality</dt>
-            <dd>{qualityLabel}</dd>
-          </div>
-          <div>
-            <dt>Music</dt>
-            <dd>{activeMusic ? activeMusic.name : 'None'}</dd>
-          </div>
-        </dl>
-        <Button
-          variant="primary"
-          size="lg"
-          icon="play"
-          disabled={!canGenerate}
-          aria-busy={isGenerating}
-          aria-describedby={sources.length === 0 ? 'generate-hint' : undefined}
-          onClick={onGenerate}
-        >
-          {isGenerating ? 'Generating…' : 'Generate'}
-        </Button>
-        {isGenerating && (
-          <Button size="lg" variant="ghost" onClick={onCancelExport}>
-            Cancel
+        <footer className="generate-bar">
+          <dl className="generate-bar__summary">
+            <div>
+              <dt>Videos</dt>
+              <dd>{pluralize(sources.length, 'video')}</dd>
+            </div>
+            <div>
+              <dt>Quality</dt>
+              <dd>{qualityLabel}</dd>
+            </div>
+            <div>
+              <dt>Music</dt>
+              <dd>{activeMusic ? activeMusic.name : 'None'}</dd>
+            </div>
+          </dl>
+          <Button
+            variant="primary"
+            size="lg"
+            icon="play"
+            disabled={!canGenerate}
+            aria-busy={isGenerating}
+            aria-describedby={sources.length === 0 ? 'generate-hint' : undefined}
+            onClick={onGenerate}
+          >
+            {isGenerating ? 'Generating…' : 'Generate'}
           </Button>
-        )}
-        {sources.length === 0 && (
-          <span id="generate-hint" className="sr-only">
-            Import at least one source video to generate.
-          </span>
-        )}
-      </footer>
-    </div>
+          {isGenerating && (
+            <Button size="lg" variant="ghost" onClick={onCancelExport}>
+              Cancel
+            </Button>
+          )}
+          {sources.length === 0 && (
+            <span id="generate-hint" className="sr-only">
+              Import at least one source video to generate.
+            </span>
+          )}
+        </footer>
+      </div>
+    </>
   )
 }

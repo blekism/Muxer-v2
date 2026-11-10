@@ -14,6 +14,9 @@ Owns everything that needs Node/OS access: windows, file dialogs, FFmpeg, and pe
     - `library:load` / `library:save` — reads and writes `userData/editor-library.json` (caption presets and music). `load` falls back to an empty library on any error.
     - `export:run` — prompts for an output directory, then calls `exportVideos`. It rejects if an export is already running, returns `null` if the dialog is cancelled, and streams `export:progress` events to the sender.
     - `export:cancel` — aborts the active `AbortController`.
+    - `downloads:list` / `start(urls, mode)` / `retry(id)` / `cancel(id)` / `show(id)` / `get-folder` / `choose-folder` — the TikTok downloader, implemented in `download.ts`. Item changes are pushed to all windows as `downloads:update` events carrying a full `DownloadItem`.
+    - `downloads:remove-many(ids)` — the only delete path, used for one video or many. It shows a native "Permanently delete N video(s)?" confirm dialog. If the user confirms, it cancels active jobs, **permanently deletes** each video file and its saved thumbnail with `fs.rm` (no Recycle Bin; a failed delete is logged and the item is still removed), removes the items from history and returns `true`. It returns `false` if the user cancels.
+  - On ready, it calls `autoUpdateYtDlp()`, which silently runs `yt-dlp --update-to stable` (60-second timeout). The queue doesn't start jobs until it finishes. A failure, for example being offline, is logged and the current exe is kept. Users have no update control.
   - **`media://<uuid>` protocol:** a privileged scheme that serves local video and image files to the renderer.
     - `mediaPaths` maps each random id to a file path, so the renderer never sees raw paths.
     - The handler supports HTTP range requests (200, 206, 416) so `<video>` can seek.
@@ -34,7 +37,14 @@ Owns everything that needs Node/OS access: windows, file dialogs, FFmpeg, and pe
   - `trimStart` is applied with `-ss`.
   - Cancellation and timeouts: the `AbortSignal` is passed to `execFile`, and each render has a 30-minute timeout.
   - Settings values from the UI are passed to FFmpeg unchanged, apart from clamps.
-- **`utils/ffpaths.ts`** — resolves `ffmpeg.exe` and `ffprobe.exe`.
+- **`download.ts`** — TikTok downloads through the standalone `yt-dlp.exe`.
+  - Binary: the bundled `resources/yt-dlp.exe` is copied to `userData/bin/yt-dlp.exe` (re-copied when the bundled one is newer), and only that copy runs, so `yt-dlp -U` works in a packaged app.
+  - Each `downloads:start` call with mode `batch` stamps one shared `batchId` on its items, which the renderer uses to group them.
+  - Queue: one `spawn` per link, at most 2 at a time (`MAX_PARALLEL`). Cancelling kills the process tree with `taskkill /T /F`.
+  - Output: `<folder>/<uploader>_<id>.mp4`, preferring H.264 (`-S vcodec:h264`) so the editor preview can play it, and merged with the bundled ffmpeg (`--ffmpeg-location`). Thumbnails go to `userData/download-thumbs/<id>.jpg` and are served as `media://` URLs.
+  - Parsing: lines prefixed `__META__` (id and title), `__PROG__` (bytes), `__FILE__` (final path) and `ERROR:`, read from both stdout and stderr, because `--print` implies `--quiet`, which moves progress to stderr.
+  - History and the output folder (default `Videos/TikTok Downloads`) persist in `userData/downloads.json`. File paths stay in main. Jobs that were active at shutdown load as failed (`Interrupted`).
+- **`utils/ffpaths.ts`** — resolves `ffmpeg.exe`, `ffprobe.exe` and the bundled `yt-dlp.exe`.
   - Dev: `resources/`.
   - Packaged: `process.resourcesPath` (via `extraResources`).
   - Windows-only, because the `.exe` names are hardcoded.
