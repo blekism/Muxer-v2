@@ -1,6 +1,12 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react'
 import { EmptyState, Icon } from '../../components/ui'
-import type { HorizontalAlign, SourceEditSettings, SourceVideo, VerticalAlign } from '../../types'
+import type {
+  HorizontalAlign,
+  MusicTrack,
+  SourceEditSettings,
+  SourceVideo,
+  VerticalAlign
+} from '../../types'
 import { TEMPERATURE_KELVIN, fontStack } from './config'
 import {
   PERSPECTIVE_CSS_DISTANCE,
@@ -27,17 +33,31 @@ interface PreviewColumnProps {
   missing: boolean
   caption: string
   settings: SourceEditSettings
+  music: MusicTrack | null
 }
 
 /**
  * Approximates the FFmpeg result with CSS so edits feel instant.
  * The exported file is still produced by FFmpeg, so treat this as a preview, not a pixel-exact render.
  */
-export function PreviewColumn({ source, missing, caption, settings }: PreviewColumnProps) {
-  const { text, video } = settings
+export function PreviewColumn({ source, missing, caption, settings, music }: PreviewColumnProps) {
+  const { text, video, audio } = settings
   const videoRef = useRef<HTMLVideoElement>(null)
+  const audioRef = useRef<HTMLAudioElement>(null)
   const [isPlaying, setIsPlaying] = useState(false)
   const [previewError, setPreviewError] = useState(false)
+
+  // Like the export: selected music replaces the original audio, otherwise honour "Keep original audio".
+  const musicUrl = music?.previewUrl
+  const videoMuted = Boolean(musicUrl) || !audio.originalEnabled
+
+  // Music follows the video's play state (it loops on its own, like `-stream_loop -1`).
+  useEffect(() => {
+    const el = audioRef.current
+    if (!el) return
+    if (isPlaying) el.play().catch((error) => console.error('[preview] music error', error))
+    else el.pause()
+  }, [isPlaying, musicUrl])
 
   useEffect(() => {
     const el = videoRef.current
@@ -93,7 +113,7 @@ export function PreviewColumn({ source, missing, caption, settings }: PreviewCol
                   src={source.previewUrl}
                   style={videoStyle}
                   autoPlay
-                  muted
+                  muted={videoMuted}
                   playsInline
                   onCanPlay={() => setPreviewError(false)}
                   onPlay={() => setIsPlaying(true)}
@@ -128,9 +148,11 @@ export function PreviewColumn({ source, missing, caption, settings }: PreviewCol
                   onEnded={(event) => {
                     event.currentTarget.currentTime = video.trimStart
                     void event.currentTarget.play()
+                    if (audioRef.current) audioRef.current.currentTime = 0
                   }}
                 />
               )}
+              {musicUrl && <audio ref={audioRef} src={musicUrl} loop />}
               <svg className="preview__filters" aria-hidden="true">
                 {/* sRGB, not the linearRGB default: FFmpeg works on gamma-encoded 8-bit RGB. */}
                 <filter id={COLOR_FILTER_ID} colorInterpolationFilters="sRGB">

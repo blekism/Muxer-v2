@@ -95,6 +95,7 @@ export function EditorPage({
             missing={activeSource ? missingPaths.has(activeSource.sourcePath) : false}
             caption={activePreset?.text ?? ''}
             settings={activeSourceSettings}
+            music={activeMusic}
           />
           <SettingsColumn
             editor={editor}

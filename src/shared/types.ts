@@ -34,6 +34,7 @@ export interface MusicTrack {
   name: string
   sourcePath: string
   durationSec: number
+  previewUrl?: string
 }
 
 export interface SavedEditorLibrary {
