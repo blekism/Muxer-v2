@@ -23,6 +23,8 @@ const FLEX_ALIGN: Record<VerticalAlign | HorizontalAlign, CSSProperties['alignIt
 
 interface PreviewColumnProps {
   source: SourceVideo | null
+  /** The source file was deleted or moved since import. */
+  missing: boolean
   caption: string
   settings: SourceEditSettings
 }
@@ -31,7 +33,7 @@ interface PreviewColumnProps {
  * Approximates the FFmpeg result with CSS so edits feel instant.
  * The exported file is still produced by FFmpeg, so treat this as a preview, not a pixel-exact render.
  */
-export function PreviewColumn({ source, caption, settings }: PreviewColumnProps) {
+export function PreviewColumn({ source, missing, caption, settings }: PreviewColumnProps) {
   const { text, video } = settings
   const videoRef = useRef<HTMLVideoElement>(null)
   const [isPlaying, setIsPlaying] = useState(false)
@@ -42,7 +44,7 @@ export function PreviewColumn({ source, caption, settings }: PreviewColumnProps)
     setIsPlaying(false)
     setPreviewError(false)
     if (el && el.readyState > 0) el.currentTime = video.trimStart
-  }, [video.trimStart, source?.id])
+  }, [video.trimStart, source?.id, missing])
 
   const togglePlayback = async () => {
     const el = videoRef.current
@@ -83,7 +85,7 @@ export function PreviewColumn({ source, caption, settings }: PreviewColumnProps)
         <div className="preview__frame">
           {source ? (
             <>
-              {source.previewUrl && (
+              {source.previewUrl && !missing && (
                 <video
                   ref={videoRef}
                   key={source.id}
@@ -157,9 +159,9 @@ export function PreviewColumn({ source, caption, settings }: PreviewColumnProps)
                 </filter>
               </svg>
               <div className="preview__overlay" style={vignetteStyle} />
-              {previewError ? (
+              {missing || previewError ? (
                 <div className="preview__media-error" role="alert">
-                  Unable to play this video.
+                  {missing ? 'Source file was moved or deleted.' : 'Unable to play this video.'}
                 </div>
               ) : (
                 <button

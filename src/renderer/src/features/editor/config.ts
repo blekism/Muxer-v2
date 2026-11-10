@@ -6,6 +6,7 @@ import type {
   TextStyle,
   VideoProps
 } from '../../types'
+import { MAX_COPIES, MIN_COPIES } from '../../../../shared/exportConstants'
 import {
   TEMPERATURE_KELVIN,
   TEMPERATURE_MIX,
@@ -81,6 +82,7 @@ const PERCENT_SCALE = { min: 0, max: 100 } as const
 const formatShown = (value: number): string => `${Math.round(value)}`
 
 export { TEMPERATURE_KELVIN, TEMPERATURE_MIX, TINT_MAX, VIGNETTE_MAX_ANGLE }
+export { MAX_COPIES, MIN_COPIES }
 
 /**
  * Every value below is stored in the units FFmpeg receives, so export.ts can use it as-is.
@@ -204,5 +206,7 @@ export const INITIAL_SOURCE_SETTINGS: SourceEditSettings = {
 export const INITIAL_SETTINGS: EditorSettings = {
   sourceSettings: {},
   quality: 'high',
-  activeSourceId: null
+  activeSourceId: null,
+  fullRandomize: false,
+  copies: 1
 }

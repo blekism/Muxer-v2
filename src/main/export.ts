@@ -1,20 +1,24 @@
 import { execFile } from 'node:child_process'
-import { mkdir, readdir, stat, unlink, writeFile } from 'node:fs/promises'
-import { basename, extname, join, parse } from 'node:path'
+import { mkdir, stat, unlink, writeFile } from 'node:fs/promises'
+import { basename, join, parse } from 'node:path'
 import { promisify } from 'node:util'
+import { shell } from 'electron'
 import type {
+  ExportFailure,
+  ExportJob,
   ExportProgress,
   ExportRequest,
   ExportResult,
   SourceEditSettings
 } from '../shared/types'
 import { TEMPERATURE_KELVIN, TEMPERATURE_MIX } from '../shared/colorConstants'
+import { clampCopies } from '../shared/exportConstants'
+import { MAX_FLASH_IMAGES } from '../shared/flashConstants'
+import { pathExists } from './fileWatch'
 import { ffmpegPath, ffprobePath } from './utils/ffpaths'
 
 const runFile = promisify(execFile)
 const FLASH_FRAMES = 3
-const FLASH_IMAGE_COUNT = 5
-const IMAGE_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.webp', '.gif'])
 const OUTPUT_WIDTHS = { low: 480, medium: 720, high: 1080 } as const
 const OUTPUT_CRFS = { low: 28, medium: 23, high: 18 } as const
 const PROBE_TIMEOUT_MS = 60_000
@@ -125,16 +129,6 @@ async function probeVideo(filePath: string, signal: AbortSignal): Promise<ProbeR
   }
 }
 
-async function imagePaths(folderPath: string | null): Promise<string[]> {
-  if (!folderPath) return []
-  const entries = await readdir(folderPath, { withFileTypes: true })
-  return entries
-    .filter((entry) => entry.isFile() && IMAGE_EXTENSIONS.has(extname(entry.name).toLowerCase()))
-    .sort((left, right) => left.name.localeCompare(right.name))
-    .map((entry) => join(folderPath, entry.name))
-    .slice(0, FLASH_IMAGE_COUNT)
-}
-
 function outputDimensions(width: number): { width: number; height: number } {
   const height = Math.max(2, Math.round((16 / 9) * width))
   return { width, height: height % 2 === 0 ? height : height + 1 }
@@ -224,6 +218,7 @@ async function renderSource(
   settings: SourceEditSettings,
   images: string[],
   outputPath: string,
+  onPercent: (percent: number) => void,
   signal: AbortSignal
 ): Promise<void> {
   const probe = await probeVideo(source.sourcePath, signal)
@@ -286,17 +281,84 @@ async function renderSource(
 
   args.push('-t', String(durationSec), '-shortest', '-movflags', '+faststart', outputPath)
 
+  // Machine-readable progress on stdout (key=value lines); stderr keeps the error output.
+  args.unshift('-progress', 'pipe:1', '-nostats')
+
   try {
-    await runFile(ffmpegPath, args, {
-      windowsHide: true,
-      maxBuffer: 50 * 1024 * 1024,
-      timeout: EXPORT_TIMEOUT_MS,
-      killSignal: 'SIGKILL',
-      signal
-    })
+    await runFfmpegWithProgress(args, durationSec, onPercent, signal)
   } finally {
     if (captionPath) await unlink(captionPath).catch(() => undefined)
   }
+}
+
+/**
+ * Runs ffmpeg like `runFile` would, and reports how far it is (0-99) from `-progress pipe:1` output.
+ * 100 is left for the caller, once the file is actually finished.
+ */
+function runFfmpegWithProgress(
+  args: string[],
+  durationSec: number,
+  onPercent: (percent: number) => void,
+  signal: AbortSignal
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const child = execFile(
+      ffmpegPath,
+      args,
+      {
+        windowsHide: true,
+        maxBuffer: 50 * 1024 * 1024,
+        timeout: EXPORT_TIMEOUT_MS,
+        killSignal: 'SIGKILL',
+        signal
+      },
+      (error) => (error ? reject(error) : resolve())
+    )
+
+    let pending = ''
+    let lastPercent = -1
+    child.stdout?.on('data', (chunk: Buffer | string) => {
+      pending += chunk.toString()
+      const lines = pending.split(/\r?\n/)
+      pending = lines.pop() ?? ''
+      for (const line of lines) {
+        // out_time_us is microseconds of output written so far ("N/A" before the first frame).
+        const match = /^out_time_us=(\d+)$/.exec(line.trim())
+        if (!match) continue
+        const percent = Math.min(99, Math.floor((Number(match[1]) / 1e6 / durationSec) * 100))
+        if (percent > lastPercent) {
+          lastPercent = percent
+          onPercent(percent)
+        }
+      }
+    })
+  })
+}
+
+/** Output files written by this session's exports; the only paths "Show in folder" will open. */
+const exportedPaths = new Set<string>()
+
+export function showExportedFile(filePath: string): void {
+  if (typeof filePath === 'string' && exportedPaths.has(filePath)) shell.showItemInFolder(filePath)
+}
+
+/** Files a source's render reads besides the flash images: the video and its music track, if any. */
+function sourceInputPaths(
+  request: ExportRequest,
+  source: ExportRequest['sources'][number]
+): string[] {
+  const musicId = request.sourceSettings[source.id]?.audio.musicId
+  const music = request.music.find((track) => track.id === musicId)
+  return music ? [source.sourcePath, music.sourcePath] : [source.sourcePath]
+}
+
+/** Every referenced input that no longer exists. Checked before the export starts. */
+export async function findMissingInputs(request: ExportRequest): Promise<string[]> {
+  const paths = new Set(request.sources.flatMap((source) => sourceInputPaths(request, source)))
+  for (const imagePath of request.flashImagePaths) paths.add(imagePath)
+  const list = [...paths]
+  const exists = await Promise.all(list.map(pathExists))
+  return list.filter((_, index) => !exists[index])
 }
 
 export async function exportVideos(
@@ -306,26 +368,85 @@ export async function exportVideos(
   signal: AbortSignal
 ): Promise<ExportResult> {
   await mkdir(outputDirectory, { recursive: true })
-  const images = await imagePaths(request.photoFolderPath)
+  const images = request.flashImagePaths.slice(0, MAX_FLASH_IMAGES)
   const outputPaths: string[] = []
+  const failures: ExportFailure[] = []
 
-  for (let index = 0; index < request.sources.length; index += 1) {
-    if (signal.aborted) throw new Error('Export cancelled')
-
-    const source = request.sources[index]
-    const settings = request.sourceSettings[source.id]
-    if (!settings) throw new Error(`Missing settings for ${source.name}`)
-
-    const outputPath = await uniqueOutputPath(
-      outputDirectory,
-      `${parse(basename(source.sourcePath)).name}_edited.mp4`
-    )
-    await renderSource(request, source, settings, images, outputPath, signal)
-    outputPaths.push(outputPath)
-    onProgress({ completed: index + 1, total: request.sources.length, sourceName: source.name })
+  const copies = clampCopies(request.copies)
+  const fileNameFor = (source: ExportRequest['sources'][number], copy: number): string => {
+    const baseName = `${parse(basename(source.sourcePath)).name}_edited`
+    return copies === 1 ? `${baseName}.mp4` : `${baseName}_v${copy + 1}.mp4`
   }
 
-  return { outputPaths }
+  // Every output is listed up front (queued) so the progress panel shows the whole batch at once.
+  const jobs: ExportJob[] = request.sources.flatMap((source) =>
+    Array.from({ length: copies }, (_, copy) => ({
+      id: `${source.id}:${copy}`,
+      label: fileNameFor(source, copy),
+      status: 'queued' as const,
+      percent: 0
+    }))
+  )
+  const emit = (): void => onProgress({ jobs: jobs.map((job) => ({ ...job })) })
+  const update = (index: number, patch: Partial<ExportJob>): void => {
+    jobs[index] = { ...jobs[index], ...patch }
+    emit()
+  }
+  emit()
+
+  let jobIndex = 0
+  for (const source of request.sources) {
+    const baseSettings = request.sourceSettings[source.id]
+    if (!baseSettings) throw new Error(`Missing settings for ${source.name}`)
+
+    for (let copy = 0; copy < copies; copy += 1, jobIndex += 1) {
+      if (signal.aborted) throw new Error('Export cancelled')
+
+      const settings: SourceEditSettings = {
+        ...baseSettings,
+        video: request.videoVariants?.[source.id]?.[copy] ?? baseSettings.video
+      }
+      const outputPath = await uniqueOutputPath(outputDirectory, fileNameFor(source, copy))
+      const current = jobIndex
+      // uniqueOutputPath may have added a -1 suffix; show the real name.
+      update(current, { status: 'rendering', percent: 0, label: basename(outputPath) })
+      try {
+        await renderSource(
+          request,
+          source,
+          settings,
+          images,
+          outputPath,
+          (percent) => update(current, { percent }),
+          signal
+        )
+        outputPaths.push(outputPath)
+        exportedPaths.add(outputPath)
+        update(current, { status: 'done', percent: 100, outputPath })
+      } catch (error) {
+        if (signal.aborted) throw error
+        // A file deleted mid-export skips only this source; other errors still stop the batch.
+        const inputs = sourceInputPaths(request, source)
+        const exists = await Promise.all(inputs.map(pathExists))
+        const missing = inputs.filter((_, i) => !exists[i])
+        if (missing.length === 0) throw error
+
+        // ffmpeg may have started writing before it failed.
+        await unlink(outputPath).catch(() => undefined)
+        const message = `File missing: ${missing.map((p) => basename(p)).join(', ')}`
+        failures.push({ sourceName: source.name, error: message })
+        // The file won't come back for the remaining copies, so skip them.
+        for (let skipped = current; skipped < current + copies - copy; skipped += 1) {
+          jobs[skipped] = { ...jobs[skipped], status: 'failed', error: message }
+        }
+        emit()
+        jobIndex = current + copies - copy
+        break
+      }
+    }
+  }
+
+  return { outputPaths, failures }
 }
 
 async function uniqueOutputPath(directory: string, fileName: string): Promise<string> {

@@ -133,5 +133,7 @@ export const INITIAL_SOURCE_SETTINGS: SourceEditSettings = {
 export const INITIAL_SETTINGS: EditorSettings = {
   sourceSettings: {},
   quality: 'high',
-  activeSourceId: null
+  activeSourceId: null,
+  fullRandomize: false,
+  copies: 1
 }

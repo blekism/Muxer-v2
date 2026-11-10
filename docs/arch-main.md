@@ -5,11 +5,11 @@ Owns everything that needs Node/OS access: windows, file dialogs, FFmpeg, and pe
 ## Files
 
 - **`index.ts`** — app entry point and IPC surface.
-  - Creates the `BrowserWindow` (preload, `sandbox: false`), loads the Vite dev URL or built `index.html`, and quits on `window-all-closed` (except on macOS).
+  - Creates the `BrowserWindow` (preload, `sandbox: false`, `titleBarStyle: 'hidden'` with a `titleBarOverlay` colored to the theme's `--chrome`/`--text-muted`), loads the Vite dev URL or built `index.html`, and quits on `window-all-closed` (except on macOS).
   - On ready, runs `testFFmpeg()` (logs only) and registers all IPC handlers.
   - **IPC handlers:**
     - `videos:import` — opens an MP4 picker, then runs `probeVideo` on each file.
-    - `photos:choose-folder` — returns the folder's image list, sorted by name.
+    - `photos:choose` — multi-select image file picker. Returns `{ images, pickedCount }`: the picked images (first `MAX_FLASH_IMAGES` from `shared/flashConstants.ts`) and how many were picked before the cut.
     - `music:import` — opens an audio picker and ffprobes each file for its duration.
     - `library:load` / `library:save` — reads and writes `userData/editor-library.json` (caption presets and music). `load` falls back to an empty library on any error.
     - `export:run` — prompts for an output directory, then calls `exportVideos`. It rejects if an export is already running, returns `null` if the dialog is cancelled, and streams `export:progress` events to the sender.
@@ -31,7 +31,7 @@ Owns everything that needs Node/OS access: windows, file dialogs, FFmpeg, and pe
     1. Rotate the full frame, then crop to 9:16 divided by zoom, then scale to the quality width (480/720/1080) at 16:9 portrait height.
     2. Perspective, then an explicit YUV→`gbrp` conversion using the source's probed matrix and range (untagged = BT.709 limited). Then `colortemperature` (skipped at 6500K, `mix=TEMPERATURE_MIX`), `colorbalance gs=` (tint, which lifts shadows only), and `vignette angle=`. Then convert back to BT.709 limited `yuv420p`. The output is tagged BT.709 (`-colorspace`/`-color_primaries`/`-color_trc`/`-color_range`) so players decode it the way the Chromium preview does. HDR sources (PQ/HLG) only log a warning and are not tone-mapped.
     - The shared color constants come from `src/shared/colorConstants.ts`, the same file the renderer uses.
-    3. Up to 5 images from the photo folder, each overlaid for 3 frames at a random start frame.
+    3. Every picked flash image (capped at `MAX_FLASH_IMAGES`), each overlaid for 3 frames at a random start frame.
     4. `drawtext` caption, read from a temp file in `%TEMP%` that is deleted afterwards.
   - Encodes with libx264, using a CRF set by quality.
   - Audio comes from the chosen music track (looped), else the original audio if enabled, else none.

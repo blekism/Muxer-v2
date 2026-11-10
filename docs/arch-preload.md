@@ -11,7 +11,7 @@ Sits between the main process (`src/main/index.ts`) and the renderer. It is the 
     | `window.api` method | IPC channel | Returns |
     | --- | --- | --- |
     | `videos.import()` | `videos:import` | `SourceVideo[]` |
-    | `photos.chooseFolder()` | `photos:choose-folder` | `PhotoFolder \| null` |
+    | `photos.choose()` | `photos:choose` | `FlashImageSelection | null` |
     | `library.load()` | `library:load` | `SavedEditorLibrary` |
     | `library.save(library)` | `library:save` | `void` |
     | `music.import()` | `music:import` | `MusicTrack[]` |

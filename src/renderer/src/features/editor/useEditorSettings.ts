@@ -6,6 +6,7 @@ import type {
   TextStyle,
   VideoProps
 } from '../../types'
+import { clampCopies } from '../../../../shared/exportConstants'
 import { DEFAULT_VIDEO, INITIAL_SETTINGS, INITIAL_SOURCE_SETTINGS, VIDEO_CONTROLS } from './config'
 
 type Action =
@@ -18,6 +19,8 @@ type Action =
   | { type: 'setQuality'; quality: ExportQuality }
   | { type: 'setActiveSource'; id: string | null }
   | { type: 'setCaptionPreset'; sourceId: string; id: string | null }
+  | { type: 'setFullRandomize'; enabled: boolean }
+  | { type: 'setCopies'; copies: number }
 
 function randomInRange([min, max]: readonly [number, number], step: number): number {
   const raw = min + Math.random() * (max - min)
@@ -27,7 +30,8 @@ function randomInRange([min, max]: readonly [number, number], step: number): num
   return Number(snapped.toFixed(decimals))
 }
 
-function randomVideoProps(): VideoProps {
+/** Random value for every video control, within its `randomRange`. */
+export function randomVideoProps(): VideoProps {
   const next = { ...DEFAULT_VIDEO }
   for (const control of VIDEO_CONTROLS) {
     next[control.key] = randomInRange(control.randomRange, control.step)
@@ -94,6 +98,10 @@ function reducer(state: EditorSettings, action: Action): EditorSettings {
         ...settings,
         captionPresetId: action.id
       }))
+    case 'setFullRandomize':
+      return { ...state, fullRandomize: action.enabled }
+    case 'setCopies':
+      return { ...state, copies: clampCopies(action.copies) }
   }
 }
 
@@ -116,7 +124,9 @@ export function useEditorSettings() {
       setQuality: (quality: ExportQuality) => dispatch({ type: 'setQuality', quality }),
       setActiveSource: (id: string | null) => dispatch({ type: 'setActiveSource', id }),
       setCaptionPreset: (sourceId: string, id: string | null) =>
-        dispatch({ type: 'setCaptionPreset', sourceId, id })
+        dispatch({ type: 'setCaptionPreset', sourceId, id }),
+      setFullRandomize: (enabled: boolean) => dispatch({ type: 'setFullRandomize', enabled }),
+      setCopies: (copies: number) => dispatch({ type: 'setCopies', copies })
     }),
     []
   )
