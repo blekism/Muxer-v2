@@ -1,5 +1,5 @@
-appId: com.electron.app
-productName: rstudio
+appId: com.reelszer.app
+productName: Reelszer
 directories:
   buildResources: build
 files:
@@ -9,6 +9,8 @@ files:
   - '!{.eslintcache,eslint.config.mjs,.prettierignore,.prettierrc.yaml,dev-app-update.yml,CHANGELOG.md,README.md}'
   - '!{.env,.env.*,.npmrc,pnpm-lock.yaml}'
   - '!{tsconfig.json,tsconfig.node.json,tsconfig.web.json}'
+  # Binaries ship via extraResources; icon.png is emitted into out/ by electron-vite.
+  - '!resources/**'
 extraResources:
   - from: resources
     to: .
@@ -16,12 +18,18 @@ extraResources:
       - ffmpeg.exe
       - ffprobe.exe
       - yt-dlp.exe
-asarUnpack:
-  - resources/**
 win:
-  executableName: rstudio
+  executableName: Reelszer
+  icon: build/icon.ico
+  target:
+    - target: nsis
+      arch:
+        - x64
 nsis:
   artifactName: ${name}-${version}-setup.${ext}
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  perMachine: false
   shortcutName: ${productName}
   uninstallDisplayName: ${productName}
   createDesktopShortcut: always
@@ -45,6 +53,3 @@ linux:
 appImage:
   artifactName: ${name}-${version}.${ext}
 npmRebuild: false
-publish:
-  provider: generic
-  url: https://example.com/auto-updates
