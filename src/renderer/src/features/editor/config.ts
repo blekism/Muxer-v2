@@ -2,6 +2,7 @@ import type {
   AudioSettings,
   EditorSettings,
   ExportQuality,
+  NumericVideoKey,
   SourceEditSettings,
   TextCase,
   TextStyle,
@@ -12,7 +13,6 @@ import { DEFAULT_FONT_ID, getFont } from '../../../../shared/fonts'
 import {
   TEMPERATURE_KELVIN,
   TEMPERATURE_MIX,
-  TINT_MAX,
   VIGNETTE_MAX_ANGLE
 } from '../../../../shared/colorConstants'
 
@@ -37,8 +37,16 @@ export const QUALITY_OPTIONS: readonly { value: ExportQuality; label: string }[]
   { value: 'high', label: 'High' }
 ]
 
+export type VideoControlGroup = 'transform' | 'color'
+
+export const VIDEO_CONTROL_GROUPS: readonly { id: VideoControlGroup; label: string }[] = [
+  { id: 'transform', label: 'Transform' },
+  { id: 'color', label: 'Color' }
+]
+
 export interface VideoControl {
-  key: keyof VideoProps
+  key: NumericVideoKey
+  group: VideoControlGroup
   label: string
   min: number
   max: number
@@ -73,9 +81,15 @@ export function fromDisplay(control: VideoControl, shown: number): number {
 }
 
 const PERCENT_SCALE = { min: 0, max: 100 } as const
+const SIGNED_SCALE = { min: -100, max: 100 } as const
 const formatShown = (value: number): string => `${Math.round(value)}`
+const formatSigned = (value: number): string => {
+  const rounded = Math.round(value)
+  return rounded > 0 ? `+${rounded}` : `${rounded}`
+}
+const formatPercent = (value: number): string => `${Math.round(value * 100)}%`
 
-export { TEMPERATURE_KELVIN, TEMPERATURE_MIX, TINT_MAX, VIGNETTE_MAX_ANGLE }
+export { TEMPERATURE_KELVIN, TEMPERATURE_MIX, VIGNETTE_MAX_ANGLE }
 export { MAX_COPIES, MIN_COPIES }
 
 /**
@@ -86,29 +100,44 @@ export const PERSPECTIVE_MAX = 0.005
 
 export const VIDEO_CONTROLS: readonly VideoControl[] = [
   {
+    key: 'speed',
+    group: 'transform',
+    label: 'Speed',
+    min: 0.97,
+    max: 1.03,
+    step: 0.005,
+    unit: '×',
+    neutral: 1,
+    randomRange: [0.97, 1.03],
+    format: (value) => `${value.toFixed(3)}×`
+  },
+  {
     key: 'zoom',
+    group: 'transform',
     label: 'Zoom',
     min: 1,
-    max: 1.18,
+    max: 1.07,
     step: 0.01,
     unit: '×',
     neutral: 1,
-    randomRange: [1.06, 1.18],
+    randomRange: [1.02, 1.07],
     format: (value) => `${value.toFixed(2)}×`
   },
   {
     key: 'rotation',
+    group: 'transform',
     label: 'Rotation',
-    min: -1,
-    max: 1,
+    min: -3,
+    max: 3,
     step: 0.1,
     unit: '°',
     neutral: 0,
-    randomRange: [-1, 1],
+    randomRange: [-3, 3],
     format: (value) => `${value.toFixed(1)}°`
   },
   {
     key: 'perspective',
+    group: 'transform',
     label: 'Perspective',
     min: -PERSPECTIVE_MAX,
     max: PERSPECTIVE_MAX,
@@ -120,6 +149,7 @@ export const VIDEO_CONTROLS: readonly VideoControl[] = [
   },
   {
     key: 'trimStart',
+    group: 'transform',
     label: 'Trim start',
     min: 0,
     max: 5,
@@ -130,41 +160,68 @@ export const VIDEO_CONTROLS: readonly VideoControl[] = [
     format: (value) => `${value.toFixed(1)}s`
   },
   {
+    // eq brightness offset. -100 = -0.025, 0 = neutral, +100 = +0.025.
+    key: 'brightness',
+    group: 'color',
+    label: 'Brightness',
+    min: -0.025,
+    max: 0.025,
+    step: 0.001,
+    unit: '',
+    neutral: 0,
+    randomRange: [-0.025, 0.025],
+    display: SIGNED_SCALE,
+    format: formatSigned
+  },
+  {
+    key: 'contrast',
+    group: 'color',
+    label: 'Contrast',
+    min: 0.96,
+    max: 1.04,
+    step: 0.002,
+    unit: '',
+    neutral: 1,
+    randomRange: [0.98, 1.04],
+    format: formatPercent
+  },
+  {
+    key: 'saturation',
+    group: 'color',
+    label: 'Saturation',
+    min: 0.94,
+    max: 1.06,
+    step: 0.002,
+    unit: '',
+    neutral: 1,
+    randomRange: [0.96, 1.06],
+    format: formatPercent
+  },
+  {
     key: 'temperature',
-    // 0 = 4200K (warm), 100 = 6800K (slightly cool). Neutral 6500K shows as about 88.
+    group: 'color',
+    // 0 = 5100K (warm), 100 = 6500K (neutral, no change).
     label: 'Color temperature (warm → cool)',
     min: TEMPERATURE_KELVIN.min,
     max: TEMPERATURE_KELVIN.max,
     step: 1,
     unit: 'K',
     neutral: TEMPERATURE_KELVIN.neutral,
-    randomRange: [TEMPERATURE_KELVIN.min, TEMPERATURE_KELVIN.max],
+    randomRange: [5100, 5900],
     display: PERCENT_SCALE,
     format: formatShown
   },
   {
-    // 0 = magenta (-0.025), 50 = neutral, 100 = green (+0.025).
-    key: 'tint',
-    label: 'Tint (magenta → green)',
-    min: -TINT_MAX,
-    max: TINT_MAX,
-    step: 0.0005,
-    unit: '',
-    neutral: 0,
-    randomRange: [-TINT_MAX, TINT_MAX],
-    display: PERCENT_SCALE,
-    format: formatShown
-  },
-  {
-    // 0 = off, 100 = 0.2 rad.
+    // 0 = off, 100 = 0.08 rad.
     key: 'vignette',
+    group: 'color',
     label: 'Vignette',
     min: 0,
     max: VIGNETTE_MAX_ANGLE,
-    step: 0.002,
+    step: 0.001,
     unit: '',
     neutral: 0,
-    randomRange: [0.1, VIGNETTE_MAX_ANGLE],
+    randomRange: [0.02, VIGNETTE_MAX_ANGLE],
     display: PERCENT_SCALE,
     format: formatShown
   }
@@ -184,13 +241,15 @@ export const DEFAULT_TEXT: TextStyle = {
   fill: '#ffffff',
   outlineColor: '#000000',
   vAlign: 'bottom',
-  hAlign: 'center'
+  hAlign: 'center',
+  position: null
 }
 
 /** Derived from the controls so defaults can never drift from the neutral values. */
-export const DEFAULT_VIDEO = Object.fromEntries(
-  VIDEO_CONTROLS.map((control) => [control.key, control.neutral])
-) as unknown as VideoProps
+export const DEFAULT_VIDEO = {
+  ...Object.fromEntries(VIDEO_CONTROLS.map((control) => [control.key, control.neutral])),
+  flip: false
+} as unknown as VideoProps
 
 export const DEFAULT_AUDIO: AudioSettings = {
   originalEnabled: true,
@@ -209,5 +268,9 @@ export const INITIAL_SETTINGS: EditorSettings = {
   quality: 'high',
   activeSourceId: null,
   fullRandomize: false,
-  copies: 1
+  copies: 1,
+  syncText: false,
+  sharedText: DEFAULT_TEXT,
+  syncCaption: false,
+  sharedCaptionPresetId: null
 }

@@ -8,6 +8,7 @@ import type {
   MusicTrack,
   FlashImageSelection,
   SavedEditorLibrary,
+  SavedEditorSession,
   SourceVideo
 } from '../shared/types'
 
@@ -21,6 +22,11 @@ interface AppApi {
   library: {
     load: () => Promise<SavedEditorLibrary>
     save: (library: SavedEditorLibrary) => Promise<void>
+  }
+  session: {
+    /** The last editing session (sources, flash images, editor settings), or null. */
+    load: () => Promise<SavedEditorSession | null>
+    save: (session: SavedEditorSession) => Promise<void>
   }
   music: {
     import: () => Promise<MusicTrack[]>

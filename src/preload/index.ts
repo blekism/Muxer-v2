@@ -9,6 +9,7 @@ import type {
   MusicTrack,
   FlashImageSelection,
   SavedEditorLibrary,
+  SavedEditorSession,
   SourceVideo
 } from '../shared/types'
 
@@ -24,6 +25,11 @@ const api = {
     load: (): Promise<SavedEditorLibrary> => ipcRenderer.invoke('library:load'),
     save: (library: SavedEditorLibrary): Promise<void> =>
       ipcRenderer.invoke('library:save', library)
+  },
+  session: {
+    load: (): Promise<SavedEditorSession | null> => ipcRenderer.invoke('session:load'),
+    save: (session: SavedEditorSession): Promise<void> =>
+      ipcRenderer.invoke('session:save', session)
   },
   music: {
     import: (): Promise<MusicTrack[]> => ipcRenderer.invoke('music:import')

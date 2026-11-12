@@ -14,6 +14,8 @@ Sits between the main process (`src/main/index.ts`) and the renderer. It is the 
     | `photos.choose()` | `photos:choose` | `FlashImageSelection | null` |
     | `library.load()` | `library:load` | `SavedEditorLibrary` |
     | `library.save(library)` | `library:save` | `void` |
+    | `session.load()` | `session:load` | `SavedEditorSession \| null` |
+    | `session.save(session)` | `session:save` | `void` |
     | `music.import()` | `music:import` | `MusicTrack[]` |
     | `export.run(request)` | `export:run` | `ExportResult \| null` |
     | `export.cancel()` | `export:cancel` | `void` |

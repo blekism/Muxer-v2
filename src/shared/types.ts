@@ -20,7 +20,7 @@ export interface FlashImage {
 
 export interface FlashImageSelection {
   images: FlashImage[]
-  /** How many files were picked before the list was cut to MAX_FLASH_IMAGES. */
+  /** How many image files were picked in the dialog. */
   pickedCount: number
 }
 
@@ -42,10 +42,26 @@ export interface SavedEditorLibrary {
   music: MusicTrack[]
 }
 
+/** Work in progress restored on launch. `editor` is the renderer's EditorSettings; main stores it as-is. */
+export interface SavedEditorSession {
+  sources: SourceVideo[]
+  /** The imported pool; only `selectedFlashImageIds` are flashed on export. */
+  flashImages: FlashImage[]
+  selectedFlashImageIds: string[]
+  flashRepeats: number
+  editor: unknown
+}
+
 export type VerticalAlign = 'top' | 'center' | 'bottom'
 export type HorizontalAlign = 'left' | 'center' | 'right'
 
 export type TextCase = 'none' | 'upper' | 'lower'
+
+/** Center of the caption box as fractions (0-1) of the frame width and height. */
+export interface TextPosition {
+  x: number
+  y: number
+}
 
 export interface TextStyle {
   font: string
@@ -56,6 +72,8 @@ export interface TextStyle {
   outlineColor: string
   vAlign: VerticalAlign
   hAlign: HorizontalAlign
+  /** Dragged position in the preview; overrides vAlign/hAlign. null = use the alignment. */
+  position: TextPosition | null
 }
 
 export interface VideoProps {
@@ -64,9 +82,19 @@ export interface VideoProps {
   perspective: number
   trimStart: number
   temperature: number
-  tint: number
   vignette: number
+  /** Playback speed multiplier (setpts / atempo). */
+  speed: number
+  /** eq brightness offset, 0 = neutral. */
+  brightness: number
+  /** eq contrast, 1 = neutral. */
+  contrast: number
+  /** eq saturation, 1 = neutral. */
+  saturation: number
+  flip: boolean
 }
+
+export type NumericVideoKey = Exclude<keyof VideoProps, 'flip'>
 
 export interface AudioSettings {
   originalEnabled: boolean
@@ -88,6 +116,8 @@ export interface ExportRequest {
   presets: CaptionPreset[]
   music: MusicTrack[]
   flashImagePaths: string[]
+  /** Times each flash image appears per video, MIN_FLASH_REPEATS to MAX_FLASH_REPEATS. */
+  flashRepeats: number
   quality: ExportQuality
   /** Outputs per source, 1 to MAX_COPIES. */
   copies: number
@@ -96,6 +126,7 @@ export interface ExportRequest {
 }
 
 export interface ExportFailure {
+  sourceId: string
   sourceName: string
   error: string
 }

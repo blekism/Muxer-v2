@@ -14,12 +14,16 @@ import type {
 import { TEMPERATURE_KELVIN, TEMPERATURE_MIX } from '../shared/colorConstants'
 import { clampCopies } from '../shared/exportConstants'
 import { applyTextCase } from '../shared/fonts'
-import { MAX_FLASH_IMAGES } from '../shared/flashConstants'
+import { MAX_FLASH_IMAGES, clampFlashRepeats } from '../shared/flashConstants'
 import { pathExists } from './fileWatch'
 import { ffmpegPath, ffprobePath, fontFilePath } from './utils/ffpaths'
 
 const runFile = promisify(execFile)
 const FLASH_FRAMES = 3
+/** No flash starts before this frame. */
+const FIRST_FLASH_FRAME = 60
+/** Minimum spacing between flashes (spike2.mjs uses 2 seconds). */
+const MIN_FLASH_GAP_SEC = 2
 const OUTPUT_WIDTHS = { low: 480, medium: 720, high: 1080 } as const
 const OUTPUT_CRFS = { low: 28, medium: 23, high: 18 } as const
 const PROBE_TIMEOUT_MS = 60_000
@@ -83,12 +87,39 @@ function escapeFilterPath(filePath: string): string {
   return filePath.replace(/\\/g, '/').replace(/:/g, '\\:').replace(/'/g, "\\'")
 }
 
-function randomFlashStarts(totalFrames: number, imageCount: number): number[] {
-  const flashFrames = Math.min(FLASH_FRAMES, totalFrames)
-  if (flashFrames <= 0) return []
+/**
+ * `count` sorted, random flash start frames, none before FIRST_FLASH_FRAME and at least MIN_FLASH_GAP_SEC apart
+ * (the gap shrinks on short clips, but never so far that flashes overlap). Uniform over the clip: random offsets
+ * in the range left after reserving the gaps, sorted, then pushed apart by i * gap.
+ */
+function flashStarts(totalFrames: number, count: number, fps: number, speed: number): number[] {
+  if (count <= 0) return []
+  // Starts are source frame numbers (overlay's `n`). The output is resampled to a constant fps after the speed
+  // change, so output frame 60 is source frame 60 * speed (and 2 output seconds are 2 * fps * speed frames).
+  const firstFrame = Math.ceil(FIRST_FLASH_FRAME * speed)
+  const span = totalFrames - FLASH_FRAMES - firstFrame
+  const preferredGap = Math.max(FLASH_FRAMES, Math.round(MIN_FLASH_GAP_SEC * fps * speed))
+  const gap = count > 1 ? Math.min(preferredGap, Math.floor(span / (count - 1))) : 0
+  if (span < 0 || (count > 1 && gap < FLASH_FRAMES)) {
+    throw new Error(
+      `Video is too short for ${count} image flash${count === 1 ? '' : 'es'} after frame ${FIRST_FLASH_FRAME}`
+    )
+  }
 
-  const latestStart = Math.max(0, totalFrames - flashFrames)
-  return Array.from({ length: imageCount }, () => Math.floor(Math.random() * (latestStart + 1)))
+  const free = span - (count - 1) * gap
+  return Array.from({ length: count }, () => Math.floor(Math.random() * (free + 1)))
+    .sort((a, b) => a - b)
+    .map((offset, index) => firstFrame + offset + index * gap)
+}
+
+/** Fisher-Yates shuffle (copy). */
+function shuffled<T>(items: readonly T[]): T[] {
+  const result = [...items]
+  for (let index = result.length - 1; index > 0; index -= 1) {
+    const other = Math.floor(Math.random() * (index + 1))
+    ;[result[index], result[other]] = [result[other], result[index]]
+  }
+  return result
 }
 
 async function probeVideo(filePath: string, signal: AbortSignal): Promise<ProbeResult> {
@@ -126,6 +157,12 @@ async function probeVideo(filePath: string, signal: AbortSignal): Promise<ProbeR
   }
 }
 
+/** Speed multiplier kept inside atempo's 0.5..2 range; anything invalid plays at normal speed. */
+function clampSpeed(value: number): number {
+  if (!Number.isFinite(value) || value <= 0) return 1
+  return Math.min(2, Math.max(0.5, value))
+}
+
 function outputDimensions(width: number): { width: number; height: number } {
   const height = Math.max(2, Math.round((16 / 9) * width))
   return { width, height: height % 2 === 0 ? height : height + 1 }
@@ -142,18 +179,43 @@ function perspectiveFilter(value: number, width: number, height: number): string
   return `perspective=x0=${topLeft}:y0=0:x1=${topRight}:y1=0:x2=${bottomLeft}:y2=${height}:x3=${bottomRight}:y3=${height}:sense=source`
 }
 
+/** drawtext x/y: a dragged center position (clamped inside the frame), else the 6% inset anchors. */
+function captionXY(text: SourceEditSettings['text']): { x: string; y: string } {
+  const position = text.position ?? null
+  if (position) {
+    return {
+      x: `max(0\\,min(w-text_w\\,w*${position.x}-text_w/2))`,
+      y: `max(0\\,min(h-text_h\\,h*${position.y}-text_h/2))`
+    }
+  }
+  return {
+    x:
+      text.hAlign === 'left' ? 'w*0.06' : text.hAlign === 'right' ? 'w-text_w-w*0.06' : '(w-text_w)/2',
+    y:
+      text.vAlign === 'top' ? 'h*0.06' : text.vAlign === 'bottom' ? 'h-text_h-h*0.06' : '(h-text_h)/2'
+  }
+}
+
 function buildFilters(
   source: ProbeResult,
   settings: SourceEditSettings,
   caption: string,
   images: string[],
+  repeats: number,
   output: { width: number; height: number },
   captionPath: string | null
 ): { filters: string[]; finalLabel: string; starts: number[] } {
-  const trimStart = Math.max(0, settings.video.trimStart)
-  const remainingDuration = Math.max(0, source.durationSec - trimStart)
-  const totalFrames = Math.floor(remainingDuration * source.fps)
-  const starts = randomFlashStarts(totalFrames, images.length)
+  const { video } = settings
+  const speed = clampSpeed(video.speed)
+  const trimStart = Math.max(0, video.trimStart)
+  // setpts only changes timestamps, so the frame count (what overlay's `n` counts) ignores speed.
+  const totalFrames = Math.floor(Math.max(0, source.durationSec - trimStart) * source.fps)
+  // Every repeat is its own flash (like passing the image twice to spike2.mjs): each gets its own random slot,
+  // and the slots are dealt to the images in random order.
+  const occurrences = shuffled(
+    images.flatMap((_, image) => Array.from({ length: repeats }, (_, copy) => ({ image, copy })))
+  )
+  const starts = flashStarts(totalFrames, occurrences.length, source.fps, speed)
   const zoom = Math.max(1, settings.video.zoom)
   const portraitAspect = 9 / 16
   const textScale = output.width / 1080
@@ -162,46 +224,57 @@ function buildFilters(
   const filters = [
     // Rotate the full frame first and crop afterwards. Rotating the already-cropped frame leaves black wedges
     // in its corners; the preview never shows them because the zoomed video fills the frame.
-    `[0:v]setpts=PTS-STARTPTS,rotate=${settings.video.rotation}*PI/180:fillcolor=black,crop=min(iw\\,ih*${portraitAspect})/${zoom}:min(ih\\,iw/${portraitAspect})/${zoom}:(iw-ow)/2:(ih-oh)/2,scale=${output.width}:${output.height}`
+    `[0:v]setpts=(PTS-STARTPTS)/${speed},rotate=${video.rotation}*PI/180:fillcolor=black,crop=min(iw\\,ih*${portraitAspect})/${zoom}:min(ih\\,iw/${portraitAspect})/${zoom}:(iw-ow)/2:(ih-oh)/2,scale=${output.width}:${output.height}`
   ]
 
-  const perspective = perspectiveFilter(settings.video.perspective, output.width, output.height)
+  const perspective = perspectiveFilter(video.perspective, output.width, output.height)
   if (perspective) filters[0] += `,${perspective}`
+  if (video.flip) filters[0] += ',hflip'
+  // eq only accepts YUV, so it runs before the RGB conversion. Contrast/brightness act on luma, saturation on chroma.
+  if (video.brightness !== 0 || video.contrast !== 1 || video.saturation !== 1) {
+    filters[0] += `,eq=brightness=${video.brightness}:contrast=${video.contrast}:saturation=${video.saturation}`
+  }
   // Explicit YUV->RGB with the source's own matrix and range (see OUTPUT_COLOR_ARGS).
   filters[0] += `,scale=in_color_matrix=${source.colorMatrix}:in_range=${source.colorRange},format=gbrp`
-  if (settings.video.temperature !== TEMPERATURE_KELVIN.neutral) {
+  if (video.temperature !== TEMPERATURE_KELVIN.neutral) {
     // The stored value is already Kelvin, so it goes to FFmpeg unchanged.
-    const temperature = Math.max(1000, Math.min(40000, settings.video.temperature))
+    const temperature = Math.max(1000, Math.min(40000, video.temperature))
     filters[0] += `,colortemperature=temperature=${temperature}:mix=${TEMPERATURE_MIX}`
   }
-  // Tint is the shadow green lift (gs) in the same +-0.025 range spike2.mjs uses; positive = greener.
-  if (settings.video.tint !== 0) filters[0] += `,colorbalance=gs=${settings.video.tint}`
   // Vignette is the lens angle in radians; larger = stronger, 0 = off.
-  if (settings.video.vignette > 0) filters[0] += `,vignette=angle=${settings.video.vignette}`
+  if (video.vignette > 0) filters[0] += `,vignette=angle=${video.vignette}`
   filters[0] += ',scale=out_color_matrix=bt709:out_range=tv,format=yuv420p[base]'
 
+  // One decoded input per image, split into one stream per repeat so each flash has its own overlay.
   for (let index = 0; index < images.length; index += 1) {
     const inputIndex = index + 1
+    const copies = Array.from({ length: repeats }, (_, copy) => `[image${index}_${copy}]`).join('')
     filters.push(
-      `[${inputIndex}:v]scale=${output.width}:${output.height}:force_original_aspect_ratio=decrease,pad=${output.width}:${output.height}:(ow-iw)/2:(oh-ih)/2:color=black[image${index}]`
+      `[${inputIndex}:v]scale=${output.width}:${output.height}:force_original_aspect_ratio=increase,crop=${output.width}:${output.height},setsar=1,split=${repeats}${copies}`
     )
   }
 
+  // Overlays are chained in time order, one per flash.
   let previousLabel = '[base]'
-  for (let index = 0; index < images.length; index += 1) {
-    const start = starts[index]
-    const end = start + Math.min(FLASH_FRAMES, totalFrames) - 1
-    const outputLabel = `[flash${index}]`
+  const flashWindows: string[] = []
+  occurrences.forEach(({ image, copy }, slot) => {
+    const start = starts[slot]
+    const window = `between(n,${start},${start + FLASH_FRAMES - 1})`
+    flashWindows.push(window)
+    const outputLabel = `[flash${slot}]`
     filters.push(
-      `${previousLabel}[image${index}]overlay=shortest=1:enable='between(n,${start},${end})'${outputLabel}`
+      `${previousLabel}[image${image}_${copy}]overlay=shortest=1:enable='${window}'${outputLabel}`
     )
     previousLabel = outputLabel
-  }
+  })
 
   if (caption) {
     if (!captionPath) throw new Error('Caption path is required when caption text is present')
+    const { x, y } = captionXY(settings.text)
+    // Hide the caption on the flash frames so the photo shows without text over it.
+    const enable = flashWindows.length > 0 ? `:enable='not(${flashWindows.join('+')})'` : ''
     filters.push(
-      `${previousLabel}drawtext=textfile='${escapeFilterPath(captionPath)}':fontfile='${escapeFilterPath(fontFilePath(settings.text.font))}':fontsize=${fontSize}:fontcolor=${settings.text.fill}:bordercolor=${settings.text.outlineColor}:borderw=${outlineWidth}:x=${settings.text.hAlign === 'left' ? 'w*0.06' : settings.text.hAlign === 'right' ? 'w-text_w-w*0.06' : '(w-text_w)/2'}:y=${settings.text.vAlign === 'top' ? 'h*0.06' : settings.text.vAlign === 'bottom' ? 'h-text_h-h*0.06' : '(h-text_h)/2'}[captioned]`
+      `${previousLabel}drawtext=textfile='${escapeFilterPath(captionPath)}':fontfile='${escapeFilterPath(fontFilePath(settings.text.font))}':fontsize=${fontSize}:fontcolor=${settings.text.fill}:bordercolor=${settings.text.outlineColor}:borderw=${outlineWidth}:x=${x}:y=${y}${enable}[captioned]`
     )
     return { filters, finalLabel: '[captioned]', starts }
   }
@@ -224,10 +297,13 @@ async function renderSource(
       `[export] ${source.name} is HDR (${probe.colorTransfer}). It is not tone-mapped, so its colors will not match the preview.`
     )
   }
-  const durationSec = probe.durationSec - Math.max(0, settings.video.trimStart)
-  if (durationSec <= 0) {
+  const speed = clampSpeed(settings.video.speed)
+  const sourceDurationSec = probe.durationSec - Math.max(0, settings.video.trimStart)
+  if (sourceDurationSec <= 0) {
     throw new Error(`Trim start is beyond the duration of ${source.name}`)
   }
+  // Output length after the speed change (setpts / atempo).
+  const durationSec = sourceDurationSec / speed
 
   const output = outputDimensions(OUTPUT_WIDTHS[request.quality])
   const preset = request.presets.find((item) => item.id === settings.captionPresetId)
@@ -236,21 +312,28 @@ async function renderSource(
     ? join(process.env.TEMP ?? process.env.TMP ?? '.', `rstudio-caption-${crypto.randomUUID()}.txt`)
     : null
 
-  if (captionPath) await writeFile(captionPath, caption, 'utf8')
+  // Built before the caption file is written, so a too-short clip doesn't leave a temp file behind.
   const { filters, finalLabel } = buildFilters(
     probe,
     settings,
     caption,
     images,
+    clampFlashRepeats(request.flashRepeats),
     output,
     captionPath
   )
+  if (captionPath) await writeFile(captionPath, caption, 'utf8')
 
   const music = request.music.find((track) => track.id === settings.audio.musicId)
   const musicInputIndex = 1 + images.length
   const args = ['-n', '-ss', String(Math.max(0, settings.video.trimStart)), '-i', source.sourcePath]
   for (const image of images) args.push('-loop', '1', '-i', image)
   if (music) args.push('-stream_loop', '-1', '-i', music.sourcePath)
+
+  // Original audio follows the video speed; music is left at its own tempo.
+  const keepOriginalAudio = !music && settings.audio.originalEnabled && probe.hasAudio
+  const retimeAudio = keepOriginalAudio && speed !== 1
+  if (retimeAudio) filters.push(`[0:a:0]atempo=${speed}[retimed]`)
 
   args.push(
     '-filter_complex',
@@ -270,8 +353,8 @@ async function renderSource(
 
   if (music) {
     args.push('-map', `${musicInputIndex}:a:0`, '-c:a', 'aac', '-b:a', '192k')
-  } else if (settings.audio.originalEnabled && probe.hasAudio) {
-    args.push('-map', '0:a:0?', '-c:a', 'aac', '-b:a', '192k')
+  } else if (keepOriginalAudio) {
+    args.push('-map', retimeAudio ? '[retimed]' : '0:a:0?', '-c:a', 'aac', '-b:a', '192k')
   } else {
     args.push('-an')
   }
@@ -431,7 +514,7 @@ export async function exportVideos(
         // ffmpeg may have started writing before it failed.
         await unlink(outputPath).catch(() => undefined)
         const message = `File missing: ${missing.map((p) => basename(p)).join(', ')}`
-        failures.push({ sourceName: source.name, error: message })
+        failures.push({ sourceId: source.id, sourceName: source.name, error: message })
         // The file won't come back for the remaining copies, so skip them.
         for (let skipped = current; skipped < current + copies - copy; skipped += 1) {
           jobs[skipped] = { ...jobs[skipped], status: 'failed', error: message }

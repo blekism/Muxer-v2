@@ -1,7 +1,8 @@
 import { app, shell, BrowserWindow, dialog, ipcMain, protocol, screen } from 'electron'
 import { execFile } from 'node:child_process'
 import { createReadStream } from 'node:fs'
-import { readFile, stat, writeFile } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
+import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { join } from 'path'
 import { basename, extname } from 'node:path'
 import { Readable } from 'node:stream'
@@ -16,6 +17,7 @@ import type {
   MusicTrack,
   FlashImageSelection,
   SavedEditorLibrary,
+  SavedEditorSession,
   SourceVideo
 } from '../shared/types'
 import {
@@ -33,7 +35,7 @@ import {
 import { exportVideos, findMissingInputs, showExportedFile } from './export'
 import { MAX_FLASH_IMAGES } from '../shared/flashConstants'
 import { initFileWatch, recheckWatchedPaths, setWatchedPaths } from './fileWatch'
-import { ffprobePath } from './utils/ffpaths'
+import { ffmpegPath, ffprobePath } from './utils/ffpaths'
 import { testFFmpeg } from './utils/test-ffpaths'
 
 const runFile = promisify(execFile)
@@ -69,6 +71,53 @@ async function saveLibrary(library: SavedEditorLibrary): Promise<void> {
   await writeFile(libraryFilePath(), JSON.stringify({ ...library, music }, null, 2), 'utf8')
 }
 
+function sessionFilePath(): string {
+  return join(app.getPath('userData'), 'editor-session.json')
+}
+
+/** Restores the last editing session with fresh media:// urls; null when there is none. */
+async function loadSession(): Promise<SavedEditorSession | null> {
+  try {
+    const saved = JSON.parse(await readFile(sessionFilePath(), 'utf8')) as SavedEditorSession
+    const flashImages = Array.isArray(saved.flashImages) ? saved.flashImages : []
+    return {
+      sources: Array.isArray(saved.sources)
+        ? await Promise.all(
+            saved.sources.map(async (source) => ({
+              ...source,
+              previewUrl: createMediaUrl(source.sourcePath),
+              thumbnailUrl: await createVideoThumbnail(source.sourcePath, source.durationSec)
+            }))
+          )
+        : [],
+      flashImages: flashImages.map((image) => ({ ...image, url: createMediaUrl(image.path) })),
+      // Sessions from before selection existed flashed every image (at most MAX_FLASH_IMAGES).
+      selectedFlashImageIds: Array.isArray(saved.selectedFlashImageIds)
+        ? saved.selectedFlashImageIds
+        : flashImages.slice(0, MAX_FLASH_IMAGES).map((image) => image.id),
+      flashRepeats: Number(saved.flashRepeats) || 0,
+      editor: saved.editor ?? null
+    }
+  } catch {
+    return null
+  }
+}
+
+async function saveSession(session: SavedEditorSession): Promise<void> {
+  // media:// ids are minted per session, so they are not persisted.
+  const sources = session.sources.map((source) => ({
+    ...source,
+    previewUrl: undefined,
+    thumbnailUrl: undefined
+  }))
+  const flashImages = session.flashImages.map((image) => ({ ...image, url: undefined }))
+  await writeFile(
+    sessionFilePath(),
+    JSON.stringify({ ...session, sources, flashImages }, null, 2),
+    'utf8'
+  )
+}
+
 function mediaContentType(filePath: string): string {
   switch (extname(filePath).toLowerCase()) {
     case '.jpg':
@@ -101,6 +150,54 @@ function createMediaUrl(filePath: string): string {
   const id = crypto.randomUUID()
   mediaPaths.set(id, filePath)
   return `media://${id}`
+}
+
+const videoThumbsDir = (): string => join(app.getPath('userData'), 'video-thumbs')
+
+/**
+ * Grabs one frame of the video into a cached jpg (keyed by path, size and mtime) and returns
+ * a media:// url for it, or undefined if the frame can't be extracted.
+ */
+async function createVideoThumbnail(
+  filePath: string,
+  durationSec: number,
+  fileStats?: Stats
+): Promise<string | undefined> {
+  try {
+    const { size, mtimeMs } = fileStats ?? (await stat(filePath))
+    const key = createHash('sha1').update(`${filePath}|${size}|${mtimeMs}`).digest('hex')
+    const thumbPath = join(videoThumbsDir(), `${key}.jpg`)
+
+    const cached = await stat(thumbPath).catch(() => null)
+    if (!cached) {
+      await mkdir(videoThumbsDir(), { recursive: true })
+      const seekSec = Math.min(1, (durationSec || 0) * 0.1)
+      await runFile(
+        ffmpegPath,
+        [
+          '-v',
+          'error',
+          '-ss',
+          String(seekSec),
+          '-i',
+          filePath,
+          '-frames:v',
+          '1',
+          '-vf',
+          'scale=480:-2',
+          '-q:v',
+          '4',
+          '-y',
+          thumbPath
+        ],
+        { windowsHide: true }
+      )
+    }
+    return createMediaUrl(thumbPath)
+  } catch (error) {
+    console.warn(`Could not create thumbnail for ${filePath}`, error)
+    return undefined
+  }
 }
 
 protocol.registerSchemesAsPrivileged([
@@ -148,13 +245,16 @@ async function probeVideo(filePath: string): Promise<SourceVideo> {
       180 ===
     90
 
+  const durationSec = Number(probe.format?.duration ?? 0)
+
   return {
     id: crypto.randomUUID(),
     name: basename(filePath),
     sourcePath: filePath,
     previewUrl: createMediaUrl(filePath),
+    thumbnailUrl: await createVideoThumbnail(filePath, durationSec, fileStats),
     sizeBytes: fileStats.size,
-    durationSec: Number(probe.format?.duration ?? 0),
+    durationSec,
     width: rotation ? videoStream.height : videoStream.width,
     height: rotation ? videoStream.width : videoStream.height
   }
@@ -170,7 +270,7 @@ async function chooseFlashImages(): Promise<FlashImageSelection | null> {
   const picked = result.filePaths.filter((filePath) =>
     imageExtensions.has(extname(filePath).toLowerCase())
   )
-  const images = picked.slice(0, MAX_FLASH_IMAGES).map((filePath) => ({
+  const images = picked.map((filePath) => ({
     id: crypto.randomUUID(),
     name: basename(filePath),
     path: filePath,
@@ -240,11 +340,11 @@ function createWindow(): void {
     minHeight: Math.min(600, work.height),
     show: false,
     autoHideMenuBar: true,
-    backgroundColor: '#000000',
+    backgroundColor: '#040406',
     // Hide the native (OS accent-colored) title bar; the renderer draws its own and the
     // window controls are recolored to match the app's --chrome / --text-muted tokens.
     titleBarStyle: 'hidden',
-    titleBarOverlay: { color: '#0f0f12', symbolColor: '#d4cde0', height: 32 },
+    titleBarOverlay: { color: '#08080c', symbolColor: '#d4cde0', height: 32 },
     ...(process.platform === 'linux' ? { icon } : {}),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
@@ -340,6 +440,8 @@ app.whenReady().then(() => {
   ipcMain.handle('photos:choose', chooseFlashImages)
   ipcMain.handle('library:load', loadLibrary)
   ipcMain.handle('library:save', (_event, library: SavedEditorLibrary) => saveLibrary(library))
+  ipcMain.handle('session:load', loadSession)
+  ipcMain.handle('session:save', (_event, session: SavedEditorSession) => saveSession(session))
   ipcMain.handle('music:import', importMusic)
   ipcMain.handle('export:run', async (event, request: ExportRequest): Promise<ExportOutcome> => {
     if (activeExportController) throw new Error('An export is already running')

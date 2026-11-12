@@ -1,4 +1,4 @@
-import { PERSPECTIVE_MAX, TEMPERATURE_KELVIN, TEMPERATURE_MIX, TINT_MAX } from './config'
+import { PERSPECTIVE_MAX, TEMPERATURE_KELVIN, TEMPERATURE_MIX } from './config'
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value))
 
@@ -40,26 +40,29 @@ export function temperatureMatrix(kelvin: number): string {
   return `${red} 0 0 0 0  0 ${green} 0 0 0  0 0 ${blue} 0 0  0 0 0 1 0`
 }
 
-/**
- * FFmpeg's colorbalance (4.4+) adds to green: v += gs * clip((0.333 - l) * 4 + 0.5, 0, 1) * 0.7,
- * where l = max(r,g,b) + min(r,g,b) (not halved). The lift is therefore only on dark pixels: full when
- * l < 0.208 (gray below ~26/255), fading to zero at l = 0.458 (gray ~58/255). Midtones and highlights are untouched.
- *
- * The preview filter needs (1 - weight) in green, so it can add without disturbing alpha (see PreviewColumn).
- * With l ~ 2 * luma, 1 - weight = clip(8 * luma - 0.832).
- */
-const SHADOW_LUMA = [0.2126, 0.7152, 0.0722].map((coefficient) => coefficient * 8)
-export const TINT_INVERSE_WEIGHT_MATRIX = `0 0 0 0 1  ${SHADOW_LUMA.join(' ')} 0 -0.832  0 0 0 0 1  0 0 0 0 1`
+const LUMA = [0.2126, 0.7152, 0.0722] as const // BT.709, what Chromium decodes with
 
-/** Amount added to green at full shadow weight: FFmpeg's gs times its 0.7 scale. Negative = magenta. */
-export function tintLift(gs: number): number {
-  return clamp(gs, -TINT_MAX, TINT_MAX) * 0.7
+/**
+ * FFmpeg's eq: luma' = contrast * (Y - 0.5) + 0.5 + brightness, chroma' = saturation * (C - 0.5) + 0.5.
+ * In RGB (c = Y + chroma part) that is c' = sat * c + (contrast - sat) * Y + 0.5 - 0.5 * contrast + brightness,
+ * one feColorMatrix. eq runs on YUV before the other color filters, so this goes first in the preview filter too.
+ */
+export function eqMatrix(brightness: number, contrast: number, saturation: number): string {
+  const offset = 0.5 - 0.5 * contrast + brightness
+  const lumaPart = LUMA.map((coefficient) => (contrast - saturation) * coefficient)
+  const row = (channel: number): string =>
+    lumaPart.map((value, index) => value + (index === channel ? saturation : 0)).join(' ') +
+    ` 0 ${offset}`
+  return `${row(0)}  ${row(1)}  ${row(2)}  0 0 0 1 0`
 }
+
+export const isEqNeutral = (brightness: number, contrast: number, saturation: number): boolean =>
+  brightness === 0 && contrast === 1 && saturation === 1
 
 /**
  * Native vignette is FFmpeg's lens angle in radians. The filter multiplies each pixel by cos(angle * d)^4,
  * where d is the distance from the center divided by the distance to the corner. This draws that same falloff,
- * so the preview shows exactly the darkness the export applies (it is subtle at the spike's 0.1 to 0.2 range).
+ * so the preview shows exactly the darkness the export applies (it is subtle at the spike's 0.02 to 0.08 range).
  */
 export function vignetteGradient(angle: number): string {
   if (angle <= 0) return 'none'

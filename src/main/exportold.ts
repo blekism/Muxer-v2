@@ -135,10 +135,6 @@ function buildFilters(
     const temperature = Math.max(1000, Math.min(40000, 6500 + settings.video.temperature * 20))
     filters[0] += `,colortemperature=temperature=${temperature}:mix=0.5`
   }
-  if (settings.video.tint !== 0) {
-    const tint = settings.video.tint / 100
-    filters[0] += `,colorbalance=rs=${tint}:gs=${-tint / 2}:bs=${-tint}`
-  }
   if (settings.video.vignette > 0) filters[0] += ',vignette=angle=PI/4'
   filters[0] += ',format=yuv420p[base]'
 

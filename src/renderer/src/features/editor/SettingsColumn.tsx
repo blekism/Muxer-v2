@@ -1,4 +1,4 @@
-import { useId } from 'react'
+import { Fragment, useId } from 'react'
 import { Button, EmptyState, Panel, RadioList, Segmented, Slider } from '../../components/ui'
 import { formatDuration } from '../../lib/format'
 import type { HorizontalAlign, MusicTrack, VerticalAlign } from '../../types'
@@ -9,6 +9,7 @@ import {
   TEXT_CASE_OPTIONS,
   TEXT_SWATCHES,
   VIDEO_CONTROLS,
+  VIDEO_CONTROL_GROUPS,
   fontStyle,
   fromDisplay,
   toDisplay
@@ -53,7 +54,19 @@ export function SettingsColumn({
 
   return (
     <div className="editor__col editor__col--settings">
+      <fieldset className="fieldset-contents" disabled={sourceId === null}>
       <Panel title="Font">
+        <label className="checkbox-field">
+          <input
+            type="checkbox"
+            checked={settings.syncText}
+            onChange={(event) => actions.setSyncText(event.target.checked, sourceId)}
+          />
+          <span>Same caption style and position on all videos</span>
+        </label>
+        {settings.syncText && (
+          <p className="field-hint">Edits apply to every video. Caption text stays per video.</p>
+        )}
         <div className="font-grid" role="radiogroup" aria-label="Typeface">
           {FONTS.map((font) => (
             <button
@@ -113,18 +126,37 @@ export function SettingsColumn({
         />
       </Panel>
 
-      <Panel title="Text position">
+      <Panel
+        title="Text position"
+        actions={
+          text.position ? (
+            <Button
+              size="sm"
+              variant="ghost"
+              icon="reset"
+              onClick={() => sourceId && actions.patchText(sourceId, { position: null })}
+            >
+              Reset
+            </Button>
+          ) : undefined
+        }
+      >
+        <p className="field-hint">
+          {text.position
+            ? 'Custom position (dragged). Pick an option below to snap back.'
+            : 'Drag the text in the preview to place it freely.'}
+        </p>
         <Segmented
           legend="Vertical"
           options={VERTICAL_OPTIONS}
           value={text.vAlign}
-          onChange={(vAlign) => sourceId && actions.patchText(sourceId, { vAlign })}
+          onChange={(vAlign) => sourceId && actions.patchText(sourceId, { vAlign, position: null })}
         />
         <Segmented
           legend="Horizontal"
           options={HORIZONTAL_OPTIONS}
           value={text.hAlign}
-          onChange={(hAlign) => sourceId && actions.patchText(sourceId, { hAlign })}
+          onChange={(hAlign) => sourceId && actions.patchText(sourceId, { hAlign, position: null })}
         />
       </Panel>
 
@@ -152,21 +184,40 @@ export function SettingsColumn({
           </>
         }
       >
-        {VIDEO_CONTROLS.map((control) => (
-          <Slider
-            key={control.key}
-            label={control.label}
-            value={toDisplay(control, video[control.key])}
-            min={control.display?.min ?? control.min}
-            max={control.display?.max ?? control.max}
-            step={control.display ? 1 : control.step}
-            unit={control.unit}
-            format={control.format}
-            disabled={locked}
-            onChange={(value) =>
-              sourceId && actions.setVideoProp(sourceId, control.key, fromDisplay(control, value))
-            }
-          />
+        {VIDEO_CONTROL_GROUPS.map((group) => (
+          <Fragment key={group.id}>
+            <h3 className="field-group-title">{group.label}</h3>
+            {group.id === 'transform' && (
+              <label className="checkbox-field">
+                <input
+                  type="checkbox"
+                  checked={video.flip}
+                  disabled={locked}
+                  onChange={(event) =>
+                    sourceId && actions.setVideoFlip(sourceId, event.target.checked)
+                  }
+                />
+                <span>Flip horizontally</span>
+              </label>
+            )}
+            {VIDEO_CONTROLS.filter((control) => control.group === group.id).map((control) => (
+              <Slider
+                key={control.key}
+                label={control.label}
+                value={toDisplay(control, video[control.key])}
+                min={control.display?.min ?? control.min}
+                max={control.display?.max ?? control.max}
+                step={control.display ? 1 : control.step}
+                unit={control.unit}
+                format={control.format}
+                disabled={locked}
+                onChange={(value) =>
+                  sourceId &&
+                  actions.setVideoProp(sourceId, control.key, fromDisplay(control, value))
+                }
+              />
+            ))}
+          </Fragment>
         ))}
         <label className="checkbox-field">
           <input
@@ -236,6 +287,7 @@ export function SettingsColumn({
         />
         <CopiesField value={settings.copies} onChange={actions.setCopies} />
       </Panel>
+      </fieldset>
     </div>
   )
 }

@@ -5,18 +5,58 @@
   color-scheme: dark;
 
   /* 60-30-10: black surfaces (60), purple secondary (30), cyan accent (10) */
-  --bg: #000000;
+  --bg: #040406;
+
+  --bg-gradient:
+    radial-gradient(
+      ellipse 120% 85% at 50% 115%,
+      rgb(168 65 155 / 0.16) 0%,
+      rgb(124 92 220 / 0.08) 40%,
+      transparent 72%
+    ),
+    radial-gradient(
+      ellipse 100% 85% at 10% 0%,
+      rgb(124 92 220 / 0.18) 0%,
+      rgb(85 65 145 / 0.09) 45%,
+      transparent 75%
+    ),
+    radial-gradient(
+      ellipse 80% 65% at 95% 5%,
+      rgb(61 220 255 / 0.12) 0%,
+      rgb(61 220 255 / 0.05) 45%,
+      transparent 75%
+    ),
+    linear-gradient(180deg, #08080c 0%, #050508 50%, #040406 100%);
+
+  /* Glass: neutral (non-purple) tint + soft sheen so --bg-gradient shows through while text
+     stays readable. Raise --glass-tint's alpha if anything gets hard to read. */
+  --glass-tint: rgb(10 10 14 / 0.48);
+  --glass-sheen: linear-gradient(
+    145deg,
+    rgb(255 255 255 / 0.07),
+    rgb(255 255 255 / 0.015) 45%,
+    rgb(255 255 255 / 0.03)
+  );
+  --glass: var(--glass-sheen), var(--glass-tint);
+  --glass-strong: var(--glass-sheen), rgb(10 10 14 / 0.78);
+  --glass-chrome: rgb(8 8 12 / 0.38);
+  --glass-field: rgb(0 0 0 / 0.35);
+  --glass-border: rgb(255 255 255 / 0.09);
+  --glass-highlight: inset 0 1px 0 rgb(255 255 255 / 0.07);
+  --glass-shadow: 0 10px 34px rgb(0 0 0 / 0.35);
+  --glass-blur: blur(24px) saturate(150%);
+
   --surface: #0d0d0e;
   --chrome: #0f0f12;
-  --secondary: #4a3163;
-  --surface-2: #211829;
-  --surface-3: #4a3163;
-  --border: rgb(74 49 99 / 0.55);
-  --border-strong: #6b4a8c;
+  --secondary: #7c6a99;
+  --surface-2: rgb(255 255 255 / 0.06);
+  --surface-3: rgb(255 255 255 / 0.12);
+  --border: rgb(255 255 255 / 0.08);
+  --border-strong: rgb(255 255 255 / 0.18);
 
   --text: #ffffff;
   --text-muted: #d4cde0;
-  --text-faint: #8f84a6;
+  --text-faint: #9893a6;
 
   --accent: #3ddcff;
   --accent-hover: #7be7ff;
@@ -25,6 +65,7 @@
 
   --success: #4ade80;
   --danger: #ff6b81;
+  --warning: #fbbf24;
 
   --radius-sm: 6px;
   --radius: 10px;
@@ -58,7 +99,8 @@ body,
 body {
   margin: 0;
   overflow: hidden;
-  background: var(--bg);
+  background: var(--bg-gradient);
+  background-color: var(--bg);
   color: var(--text);
   font: 400 13px/1.45 var(--font-ui);
   -webkit-font-smoothing: antialiased;
@@ -163,7 +205,8 @@ button {
   gap: var(--space-2);
   height: 32px;
   padding: 0 calc(100vw - env(titlebar-area-width, calc(100vw - 140px))) 0 var(--space-3);
-  background: var(--chrome);
+  /* Opaque so it matches titleBarOverlay.color in main/index.ts. */
+  background: #08080c;
   border-bottom: 1px solid var(--border);
   color: var(--text-muted);
   font-size: 12px;
@@ -203,8 +246,13 @@ button {
   flex-direction: column;
   gap: var(--space-1);
   min-width: 0;
+  /* backdrop-filter makes this a stacking context; z-index lifts it (and its tooltips)
+     above the glass panels in .main. */
+  position: relative;
+  z-index: 10;
   padding: var(--space-3) 10px;
-  background: var(--chrome);
+  background: var(--glass-chrome);
+  backdrop-filter: var(--glass-blur);
   border-right: 1px solid var(--border);
 }
 
@@ -283,7 +331,7 @@ button {
   padding: 5px 10px;
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-sm);
-  background: var(--surface-2);
+  background: #16161c;
   color: var(--text);
   font-size: 12px;
   font-weight: 500;
@@ -314,7 +362,8 @@ button {
   align-items: baseline;
   gap: var(--space-3);
   padding: 12px var(--space-4);
-  background: var(--chrome);
+  background: var(--glass-chrome);
+  backdrop-filter: var(--glass-blur);
   border-bottom: 1px solid var(--border);
 }
 .navbar__title {
@@ -341,9 +390,11 @@ button {
   display: flex;
   flex-direction: column;
   min-height: 0;
-  background: var(--surface);
-  border: 1px solid var(--border);
+  background: var(--glass);
+  backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--glass-border);
   border-radius: var(--radius-lg);
+  box-shadow: var(--glass-highlight), var(--glass-shadow);
 }
 
 .panel__header {
@@ -353,7 +404,7 @@ button {
   gap: var(--space-2);
   min-height: 46px;
   padding: 8px 12px;
-  background: linear-gradient(to right, rgb(74 49 99 / 0.18), transparent);
+  background: linear-gradient(to right, rgb(255 255 255 / 0.04), transparent);
   border-bottom: 1px solid var(--border);
   border-radius: var(--radius-lg) var(--radius-lg) 0 0;
 }
@@ -400,6 +451,8 @@ button {
   color: var(--text-faint);
   border: 1px dashed var(--border-strong);
   border-radius: var(--radius);
+  margin-top: 12px;
+  margin-bottom: 12px;
 }
 .empty strong {
   color: var(--text-muted);
@@ -473,6 +526,26 @@ button {
   background: color-mix(in srgb, var(--danger) 18%, transparent);
 }
 
+/* Sonner toasts: border and icon take the color of the toast type. */
+[data-sonner-toast] {
+  --toast-color: var(--surface-3);
+  border-color: var(--toast-color) !important;
+}
+[data-sonner-toast][data-type='success'] {
+  --toast-color: var(--success);
+}
+[data-sonner-toast][data-type='warning'] {
+  --toast-color: var(--warning);
+}
+[data-sonner-toast][data-type='error'] {
+  --toast-color: var(--danger);
+}
+[data-sonner-toast][data-type='success'] [data-icon],
+[data-sonner-toast][data-type='warning'] [data-icon],
+[data-sonner-toast][data-type='error'] [data-icon] {
+  color: var(--toast-color);
+}
+
 .icon-btn {
   display: grid;
   place-items: center;
@@ -484,7 +557,7 @@ button {
   background: transparent;
   color: var(--text-faint);
 }
-.icon-btn:hover {
+.icon-btn:hover:not(:disabled) {
   background: var(--surface-3);
   color: var(--text);
 }
@@ -493,7 +566,7 @@ button {
   width: 100%;
   height: 32px;
   padding: 0 10px;
-  background: var(--bg);
+  background: var(--glass-field);
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-sm);
 }
@@ -511,6 +584,10 @@ textarea.input {
 select.input {
   padding-right: 6px;
 }
+/* The native dropdown list needs a solid color (the field itself is translucent). */
+select.input option {
+  background: #16161c;
+}
 
 .field {
   display: flex;
@@ -520,6 +597,17 @@ select.input {
 .field-label {
   color: var(--text-muted);
   font-size: 12px;
+}
+.field-group-title {
+  margin: var(--space-2) 0 0;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.field-group-title:first-child {
+  margin-top: 0;
 }
 .field-hint {
   margin: 0;
@@ -617,7 +705,7 @@ select.input {
   grid-auto-flow: column;
   grid-auto-columns: 1fr;
   padding: 2px;
-  background: var(--bg);
+  background: var(--glass-field);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
 }
@@ -786,8 +874,26 @@ select.input {
   overflow-y: auto;
   padding-right: 2px;
 }
-.editor__col--settings > .panel {
+.editor__col--settings > .fieldset-contents > .panel {
   flex: none;
+}
+
+/* Disables every native control inside without changing the layout. Only the
+   controls are dimmed; panels, titles and hints stay readable. */
+.fieldset-contents {
+  display: contents;
+}
+.fieldset-contents:disabled
+  :is(
+    button:not(.btn),
+    input[type='range'],
+    input[type='color'],
+    input[type='checkbox'],
+    .segmented__option,
+    .radio-list__label
+  ) {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 .folder-info {
@@ -815,6 +921,42 @@ select.input {
 .thumb-grid__item {
   position: relative;
 }
+.thumb-grid__select {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  cursor: pointer;
+}
+.thumb-grid__select .thumb {
+  border-radius: 6px;
+}
+.thumb-grid__select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.thumb-grid__select:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.thumb-grid__item--selected .thumb {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.thumb-grid__check {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #000;
+}
 /* Always visible (not hover-only) so it also works by keyboard and touch. */
 .thumb-grid__remove.icon-btn {
   position: absolute;
@@ -828,6 +970,10 @@ select.input {
 .thumb-grid__remove.icon-btn:hover {
   background: var(--danger);
   color: #fff;
+}
+
+.source-list__remove.icon-btn {
+  margin-right: 8px;
 }
 
 .source-list {
@@ -882,9 +1028,11 @@ select.input {
   min-width: 0;
   min-height: 0;
   padding: var(--space-4);
-  background: var(--surface);
-  border: 1px solid var(--border);
+  background: var(--glass);
+  backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--glass-border);
   border-radius: var(--radius-lg);
+  box-shadow: var(--glass-highlight), var(--glass-shadow);
 }
 .preview__stage {
   display: grid;
@@ -901,13 +1049,50 @@ select.input {
   aspect-ratio: 9 / 16;
   overflow: hidden;
   container-type: inline-size;
-  background: #000;
+  /* Only visible while empty; a loaded video covers it. */
+  background:
+    radial-gradient(
+      ellipse 90% 65% at 65% 0%,
+      rgb(61 220 255 / 0.28) 0%,
+      rgb(61 220 255 / 0.12) 35%,
+      transparent 75%
+    ),
+    radial-gradient(
+      ellipse 95% 75% at 5% 55%,
+      rgb(124 92 220 / 0.3) 0%,
+      rgb(124 92 220 / 0.12) 40%,
+      transparent 78%
+    ),
+    radial-gradient(
+      ellipse 85% 65% at 90% 100%,
+      rgb(200 70 160 / 0.22) 0%,
+      rgb(200 70 160 / 0.08) 40%,
+      transparent 75%
+    ),
+    linear-gradient(180deg, #0c0b14 0%, #07060b 100%);
   border-radius: var(--radius);
-  box-shadow: 0 12px 40px rgb(0 0 0 / 0.5);
+  box-shadow:
+    inset 0 0 0 1px rgb(255 255 255 / 0.08),
+    0 20px 50px rgb(0 0 0 / 0.5);
 }
 .preview__frame > .empty {
-  margin: 12px;
-  border-color: var(--border);
+  flex: none;
+  max-width: calc(100% - 28px);
+  margin: auto;
+  padding: 22px 16px;
+  background: rgb(255 255 255 / 0.06);
+  border: 1px solid rgb(255 255 255 / 0.16);
+  backdrop-filter: blur(14px);
+  box-shadow: var(--glass-highlight);
+}
+.preview__frame > .empty strong {
+  color: var(--text);
+}
+.preview__frame > .empty span {
+  color: var(--text-muted);
+}
+.preview__frame > .empty .icon {
+  color: var(--accent);
 }
 .preview__video {
   position: absolute;
@@ -972,6 +1157,21 @@ select.input {
   /* Stroke behind the fill so the outline never eats into the letters. */
   paint-order: stroke fill;
 }
+.preview__caption-text--draggable {
+  pointer-events: auto;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+  border-radius: 4px;
+  outline: 2px dashed rgb(255 255 255 / 0.75);
+  outline-offset: 4px;
+}
+.preview__caption-text--draggable:hover {
+  outline-color: #fff;
+}
+.preview__caption-text--draggable:active {
+  cursor: grabbing;
+}
 
 /* Generate bar */
 .generate-bar {
@@ -980,9 +1180,11 @@ select.input {
   justify-content: space-between;
   gap: var(--space-4);
   padding: 10px 16px;
-  background: var(--surface);
-  border: 1px solid var(--border);
+  background: var(--glass);
+  backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--glass-border);
   border-radius: var(--radius-lg);
+  box-shadow: var(--glass-highlight), var(--glass-shadow);
 }
 .generate-bar__summary {
   display: flex;
@@ -1069,7 +1271,8 @@ select.input {
   gap: 20px;
   padding: 10px;
   border-bottom: 1px solid var(--border);
-  margin-right: var(--space-3);
+  /* margin-right: var(--space-3); */
+  /* background-color: #000000; */
 }
 .history__item:last-child {
   border-bottom: 0;
@@ -1124,6 +1327,8 @@ select.input {
   margin: auto -12px 0;
   padding: var(--space-2) var(--space-3);
   border-top: 1px solid color-mix(in srgb, var(--danger) 40%, transparent);
+  border-bottom-left-radius: 10px;
+  border-bottom-right-radius: 10px;
   /* Opaque, so rows scrolling underneath don't show through. */
   background: color-mix(in srgb, var(--danger) 12%, var(--surface));
   color: var(--danger);
@@ -1260,9 +1465,10 @@ select.input {
 }
 .media-card {
   overflow: hidden;
-  background: var(--surface);
-  border: 1px solid var(--border);
+  background: rgb(255 255 255 / 0.04);
+  border: 1px solid var(--glass-border);
   border-radius: var(--radius-lg);
+  box-shadow: var(--glass-highlight);
 }
 .media-card__thumb {
   width: 100%;
@@ -1307,17 +1513,20 @@ select.input {
   flex-direction: column;
   width: min(360px, calc(100vw - 2 * var(--space-4)));
   overflow: hidden;
-  background: var(--surface);
+  background: var(--glass-strong);
+  backdrop-filter: var(--glass-blur);
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-lg);
-  box-shadow: 0 12px 32px rgb(0 0 0 / 0.55);
+  box-shadow:
+    var(--glass-highlight),
+    0 12px 32px rgb(0 0 0 / 0.55);
 }
 .export-panel__head {
   display: flex;
   align-items: center;
   gap: var(--space-1);
   padding: var(--space-2) var(--space-2) var(--space-2) var(--space-3);
-  background: var(--chrome);
+  background: rgb(255 255 255 / 0.04);
 }
 .export-panel__title {
   flex: 1;
@@ -1336,7 +1545,7 @@ select.input {
   align-items: center;
   gap: var(--space-2);
   padding: var(--space-1) var(--space-2) var(--space-2) var(--space-3);
-  background: var(--chrome);
+  background: rgb(255 255 255 / 0.04);
 }
 .export-panel__overall .progress {
   flex: 1;
@@ -1419,12 +1628,12 @@ select.input {
   padding: 6px;
   border: 1px solid var(--border);
   border-radius: 10px;
-  background: var(--surface);
+  background: rgb(255 255 255 / 0.04);
   color: var(--text-muted);
   cursor: pointer;
 }
 
-.font-card:hover {
+.font-card:hover:not(:disabled) {
   border-color: var(--border-strong);
 }
 

@@ -1,13 +1,25 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { toast } from 'sonner'
 import { TitleBar } from './components/TitleBar'
 import { BrandMark, Icon, type IconName } from './components/ui'
 import { DownloaderPage } from './features/downloader/DownloaderPage'
 import { EditorPage } from './features/editor/EditorPage'
 import { randomVideoProps, useEditorSettings } from './features/editor/useEditorSettings'
 import { LibraryPage } from './features/library/LibraryPage'
-import { fileName } from './lib/format'
-import { MAX_FLASH_IMAGES } from '../../shared/flashConstants'
-import type { CaptionPreset, DownloadItem, FlashImage, MusicTrack, SourceVideo } from './types'
+import { fileName, pluralize } from './lib/format'
+import {
+  MAX_FLASH_IMAGES,
+  MIN_FLASH_REPEATS,
+  clampFlashRepeats
+} from '../../shared/flashConstants'
+import type {
+  CaptionPreset,
+  DownloadItem,
+  EditorSettings,
+  FlashImage,
+  MusicTrack,
+  SourceVideo
+} from './types'
 import {
   ExportProgressPanel,
   type ExportPanelState,
@@ -67,11 +79,16 @@ export default function App() {
   const editor = useEditorSettings()
 
   const [sources, setSources] = useState<SourceVideo[]>([])
+  // The imported pool; only the selected ones are flashed on export.
   const [flashImages, setFlashImages] = useState<FlashImage[]>([])
+  const [selectedFlashIds, setSelectedFlashIds] = useState<string[]>([])
   const [flashNotice, setFlashNotice] = useState<string | null>(null)
+  const [flashRepeats, setFlashRepeats] = useState(MIN_FLASH_REPEATS)
   const [presets, setPresets] = useState<CaptionPreset[]>([])
   const [music, setMusic] = useState<MusicTrack[]>([])
   const [libraryLoaded, setLibraryLoaded] = useState(false)
+  // Nothing is saved until the previous session is restored, so it can't be overwritten.
+  const [sessionLoaded, setSessionLoaded] = useState(false)
   // Drives the bottom-right progress box; stays after the export ends until the user closes it.
   const [exportProgress, setExportProgress] = useState<ExportPanelState | null>(null)
   const [downloads, setDownloads] = useState<DownloadItem[]>([])
@@ -92,6 +109,11 @@ export default function App() {
     for (const image of flashImages) paths.add(image.path)
     return [...paths].sort()
   }, [flashImages, libraryLoaded, music, sources])
+  const selectedFlashImages = useMemo(
+    () => flashImages.filter((image) => selectedFlashIds.includes(image.id)),
+    [flashImages, selectedFlashIds]
+  )
+
   // Paths can't contain a newline, so this key changes only when the set does.
   const watchedKey = watchedPaths.join('\n')
 
@@ -119,7 +141,7 @@ export default function App() {
     })
   }, [watchedKey])
 
-  /** Missing files the export would read: sources, music they use, the flash images. */
+  /** Missing files the export would read: sources, music they use, the selected flash images. */
   const missingInputs = useMemo(() => {
     const inputs = new Set(sources.map((source) => source.sourcePath))
     for (const source of sources) {
@@ -127,9 +149,9 @@ export default function App() {
       const track = music.find((m) => m.id === musicId)
       if (track) inputs.add(track.sourcePath)
     }
-    for (const image of flashImages) inputs.add(image.path)
+    for (const image of selectedFlashImages) inputs.add(image.path)
     return [...inputs].filter((path) => missingPaths.has(path))
-  }, [editor, flashImages, missingPaths, music, sources])
+  }, [editor, selectedFlashImages, missingPaths, music, sources])
 
   // A "missing files" error stops showing once every referenced file is back or removed.
   const visibleExportError =
@@ -199,6 +221,59 @@ export default function App() {
     })
   }, [libraryLoaded, music, presets])
 
+  const { hydrate, removeSources: removeSourceSettings } = editor.actions
+
+  useEffect(() => {
+    let disposed = false
+    void window.api.session
+      .load()
+      .then((saved) => {
+        if (disposed || !saved) return
+        setSources(saved.sources)
+        setFlashImages(saved.flashImages)
+        setSelectedFlashIds(saved.selectedFlashImageIds.slice(0, MAX_FLASH_IMAGES))
+        setFlashRepeats(clampFlashRepeats(saved.flashRepeats || MIN_FLASH_REPEATS))
+        if (saved.editor && typeof saved.editor === 'object') {
+          hydrate(saved.editor as Partial<EditorSettings>)
+        }
+      })
+      .catch((error) => console.error('Unable to load editor session', error))
+      .finally(() => {
+        if (!disposed) setSessionLoaded(true)
+      })
+    return () => {
+      disposed = true
+    }
+  }, [hydrate])
+
+  // Debounced: sliders change settings many times a second.
+  useEffect(() => {
+    if (!sessionLoaded) return
+    const session = {
+      sources,
+      flashImages,
+      selectedFlashImageIds: selectedFlashIds,
+      flashRepeats,
+      editor: editor.settings
+    }
+    const timer = window.setTimeout(() => {
+      void window.api.session.save(session).catch((error) => {
+        console.error('Unable to save editor session', error)
+      })
+    }, 400)
+    return () => window.clearTimeout(timer)
+  }, [editor.settings, flashImages, flashRepeats, selectedFlashIds, sessionLoaded, sources])
+
+  const removeSources = useCallback(
+    (ids: string[]) => {
+      if (ids.length === 0) return
+      const removed = new Set(ids)
+      setSources((prev) => prev.filter((source) => !removed.has(source.id)))
+      removeSourceSettings(ids)
+    },
+    [removeSourceSettings]
+  )
+
   const addDownloads = useCallback((urls: string[], mode: DownloadItem['mode']) => {
     // Main emits `downloads:update` for each new item, which adds it to the list.
     void window.api.downloads.start(urls, mode).catch((error) => {
@@ -234,7 +309,8 @@ export default function App() {
         ),
         presets,
         music,
-        flashImagePaths: flashImages.map((image) => image.path),
+        flashImagePaths: selectedFlashImages.map((image) => image.path),
+        flashRepeats,
         quality: editor.settings.quality,
         copies,
         videoVariants: Object.fromEntries(
@@ -253,6 +329,10 @@ export default function App() {
       } else if (result.kind === 'done') {
         finalState = 'done'
         console.log('Exported videos', result.outputPaths)
+        // The batch is done: clear the sources that exported (failed ones stay to retry).
+        // Flash images, music and presets are kept for the next batch.
+        const failed = new Set(result.failures.map((failure) => failure.sourceId))
+        removeSources(sources.filter((source) => !failed.has(source.id)).map((s) => s.id))
         if (result.failures.length > 0) {
           setExportError({
             message: `Exported ${result.outputPaths.length} of ${totalOutputs}. Skipped ${result.failures
@@ -260,6 +340,11 @@ export default function App() {
               .join('; ')}.`,
             missing: false
           })
+          toast.warning(
+            `Exported ${result.outputPaths.length} of ${totalOutputs}. Some videos were skipped.`
+          )
+        } else {
+          toast.success(`Exported ${pluralize(result.outputPaths.length, 'video')}.`)
         }
       }
     } catch (error) {
@@ -270,10 +355,9 @@ export default function App() {
       }
       const message = error instanceof Error ? error.message : String(error)
       // ipcRenderer.invoke prefixes "Error invoking remote method 'export:run': Error: ".
-      setExportError({
-        message: `Export failed: ${message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '')}`,
-        missing: false
-      })
+      const cleaned = message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '')
+      setExportError({ message: `Export failed: ${cleaned}`, missing: false })
+      toast.error(`Export failed: ${cleaned}`)
     } finally {
       isGeneratingRef.current = false
       setIsGenerating(false)
@@ -327,7 +411,10 @@ export default function App() {
               editor={editor}
               sources={sources}
               flashImages={flashImages}
+              selectedFlashIds={selectedFlashIds}
               flashNotice={flashNotice}
+              flashRepeats={flashRepeats}
+              onChangeFlashRepeats={(value) => setFlashRepeats(clampFlashRepeats(value))}
               presets={presets}
               music={music}
               isGenerating={isGenerating}
@@ -337,35 +424,55 @@ export default function App() {
                 try {
                   const selection = await window.api.photos.choose()
                   if (!selection) return
-                  // Picks are added to the current images; already-picked files are skipped.
-                  const existing = new Set(flashImages.map((image) => image.path))
-                  const fresh = selection.images.filter((image) => !existing.has(image.path))
-                  const added = fresh.slice(0, Math.max(0, MAX_FLASH_IMAGES - flashImages.length))
+                  // Picks are added to the pool unselected; already-imported files are skipped.
+                  const existing = new Set(flashImages.map((image) => image.path.toLowerCase()))
+                  const fresh = selection.images.filter(
+                    (image) => !existing.has(image.path.toLowerCase())
+                  )
                   const duplicates = selection.images.length - fresh.length
-                  setFlashImages([...flashImages, ...added])
+                  setFlashImages([...flashImages, ...fresh])
                   setFlashNotice(
-                    selection.pickedCount - duplicates > added.length
-                      ? `The limit is ${MAX_FLASH_IMAGES} images, so ${selection.pickedCount - duplicates - added.length} weren't added. Remove one to add another.`
+                    duplicates > 0
+                      ? `${pluralize(duplicates, 'image')} already imported, skipped.`
                       : null
                   )
                 } catch (error) {
                   console.error('Unable to choose flash images', error)
+                  toast.error("Couldn't add flash images.")
                 }
               }}
               onRemoveFlashImage={(id) => {
                 // Only removed from the app; the file stays on disk.
                 setFlashImages((prev) => prev.filter((image) => image.id !== id))
+                setSelectedFlashIds((prev) => prev.filter((selected) => selected !== id))
                 setFlashNotice(null)
               }}
+              onToggleFlashImage={(id) =>
+                setSelectedFlashIds((prev) => {
+                  if (prev.includes(id)) return prev.filter((selected) => selected !== id)
+                  return prev.length >= MAX_FLASH_IMAGES ? prev : [...prev, id]
+                })
+              }
               onImportVideos={async () => {
                 try {
                   const imported = await window.api.videos.import()
-                  setSources((prev) => [...prev, ...imported])
+                  if (imported.length === 0) return
+                  // Windows paths are case-insensitive; already-imported videos are skipped.
+                  const existing = new Set(sources.map((s) => s.sourcePath.toLowerCase()))
+                  const fresh = imported.filter((v) => !existing.has(v.sourcePath.toLowerCase()))
+                  const duplicates = imported.filter((v) => !fresh.includes(v))
+                  setSources([...sources, ...fresh])
+                  if (duplicates.length === 1) {
+                    toast.warning(`${duplicates[0].name} is already imported.`)
+                  } else if (duplicates.length > 1) {
+                    toast.warning(`${duplicates.length} videos were already imported and weren't added again.`)
+                  }
                 } catch (error) {
                   console.error('Unable to import videos', error)
+                  toast.error("Couldn't import videos.")
                 }
               }}
-              onRemoveSource={(id) => setSources((prev) => prev.filter((s) => s.id !== id))}
+              onRemoveSource={(id) => removeSources([id])}
               onAddPreset={(text) =>
                 setPresets((prev) => [...prev, { id: crypto.randomUUID(), text }])
               }
@@ -376,6 +483,7 @@ export default function App() {
                   setMusic((prev) => [...prev, ...imported])
                 } catch (error) {
                   console.error('Unable to import music', error)
+                  toast.error("Couldn't import music.")
                 }
               }}
               onRemoveMusic={(id) => setMusic((prev) => prev.filter((m) => m.id !== id))}

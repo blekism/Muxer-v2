@@ -7,13 +7,14 @@ import path from 'node:path'
 const run = promisify(execFile)
 const here = path.dirname(fileURLToPath(import.meta.url))
 const binDir = path.join(here, 'resources', 'bin', 'win')
-const outDir = path.join(here, 'out')
 
+const outDir = path.join(here, 'out')
 mkdirSync(outDir, { recursive: true })
 
 const FFMPEG = process.env.FFMPEG_PATH ?? path.join(binDir, 'ffmpeg.exe')
 const FFPROBE = process.env.FFPROBE_PATH ?? path.join(binDir, 'ffprobe.exe')
 
+// fail loudly: no silent fallback to the system install
 for (const bin of [FFMPEG, FFPROBE]) {
   if (!existsSync(bin)) {
     console.error(`Binary not found: ${bin}`)
@@ -21,9 +22,10 @@ for (const bin of [FFMPEG, FFPROBE]) {
   }
 }
 
-const { stdout: version } = await run(FFMPEG, ['-version'])
+// prove which binary is running
+const { stdout: ver } = await run(FFMPEG, ['-version'])
 console.log(`Using: ${FFMPEG}`)
-console.log(`${version.split('\n')[0]}\n`)
+console.log(ver.split('\n')[0] + '\n')
 
 const rand = (min, max) => min + Math.random() * (max - min)
 
@@ -37,104 +39,154 @@ async function probe(file) {
     '-show_format',
     file
   ])
-
-  const data = JSON.parse(stdout)
-  const video = data.streams.find((stream) => stream.codec_type === 'video')
-
-  if (!video) {
+  const j = JSON.parse(stdout)
+  const v = j.streams.find((s) => s.codec_type === 'video')
+  if (!v) {
     throw new Error(`No video stream found in ${file}`)
   }
 
-  const [numerator, denominator] = video.r_frame_rate.split('/').map(Number)
-
-  const rotation =
+  const [n, d] = v.r_frame_rate.split('/').map(Number)
+  // phone videos often store rotation as metadata; ffmpeg auto-rotates,
+  // so the real frame size is swapped for 90/270 degree clips
+  const rot =
     Math.abs(
       Number(
-        video.tags?.rotate ??
-          video.side_data_list?.find((sideData) => sideData.rotation !== undefined)?.rotation ??
-          0
+        v.tags?.rotate ?? v.side_data_list?.find((s) => s.rotation !== undefined)?.rotation ?? 0
       )
     ) %
       180 ===
     90
 
   return {
-    width: rotation ? video.height : video.width,
-    height: rotation ? video.width : video.height,
-    fps: numerator / denominator,
-    durationSec: Number(data.format.duration),
-    hasAudio: data.streams.some((stream) => stream.codec_type === 'audio')
+    width: rot ? v.height : v.width,
+    height: rot ? v.width : v.height,
+    fps: n / d,
+    durationSec: Number(j.format.duration),
+    hasAudio: j.streams.some((s) => s.codec_type === 'audio')
   }
 }
 
-function makeFlashStarts(totalFrames, imageCount, flashFrames) {
-  if (totalFrames < flashFrames) {
+function makeFlashStarts(totalFrames, imageCount, flashFrames, fps) {
+  const firstFlashFrame = Math.max(0, Math.round(fps * 2))
+  const minimumGapFrames = Math.round(fps * 2)
+
+  if (totalFrames < firstFlashFrame + flashFrames) {
     throw new Error('Video is shorter than the image flash duration.')
   }
 
   const latestStart = totalFrames - flashFrames
+  const starts = []
 
-  return Array.from({ length: imageCount }, () => Math.floor(Math.random() * (latestStart + 1)))
+  for (let index = 0; index < imageCount; index++) {
+    const earliestStart = index === 0 ? firstFlashFrame : starts[index - 1] + minimumGapFrames
+
+    if (earliestStart > latestStart) {
+      throw new Error('Video is too short for all image flashes.')
+    }
+
+    // The first image should appear near the beginning, not anywhere after it.
+    starts.push(
+      index === 0
+        ? firstFlashFrame
+        : earliestStart + Math.floor(Math.random() * (latestStart - earliestStart + 1))
+    )
+  }
+
+  return starts
 }
 
-async function edit(input, flashImages, outFile) {
-  const media = await probe(input)
+async function edit(input, flashImg, outFile) {
+  const m = await probe(input)
 
-  const speed = rand(0.85, 1.15)
-  const brightness = rand(-0.08, 0.08)
-  const contrast = rand(0.94, 1.08)
-  const saturation = rand(0.9, 1.12)
-  const zoom = rand(1.06, 1.18)
-  const flip = Math.random() > 0.9
+  // random properties (ranges are placeholders for the spike)
+  const speed = rand(0.97, 1.03)
+  const brightness = rand(-0.025, 0.025)
+  const contrast = rand(0.98, 1.04)
+  const saturation = rand(0.96, 1.06)
 
-  const temperature = rand(4200, 6800)
-  const temperatureMix = rand(0.25, 0.65)
+  const zoom = rand(1.02, 1.07)
+  const flip = Math.random() > 0.5
 
-  const redLift = rand(-0.025, 0.025)
-  const greenLift = rand(-0.025, 0.025)
-  const blueLift = rand(-0.025, 0.025)
+  const colorTemperature = rand(5100, 5900)
 
-  const vignetteAngle = rand(0.1, 0.2)
+  // Subtle RGB color-balance adjustments.
+  // Shadows, midtones, and highlights respectively.
+  const colorGrade = {
+    shadowsRed: rand(-0.012, 0.012),
+    shadowsGreen: rand(-0.01, 0.01),
+    shadowsBlue: rand(-0.015, 0.015),
 
-  const rotation = rand(-1.0, 1.0) // degrees
-  const perspectiveX = rand(-1, 1)
-  const perspectiveY = rand(-1, 1)
+    midtonesRed: rand(-0.015, 0.02),
+    midtonesGreen: rand(-0.01, 0.01),
+    midtonesBlue: rand(-0.02, 0.01),
+
+    highlightsRed: rand(-0.01, 0.015),
+    highlightsGreen: rand(-0.01, 0.01),
+    highlightsBlue: rand(-0.015, 0.01)
+  }
+
+  const vignetteAngle = rand(0.02, 0.08)
+
+  const rotationDegrees = rand(-3, 3)
+  const rotationRadians = rotationDegrees * (Math.PI / 180)
+
+  // flash for 3 frames at a random spot, leaving room before the end
+  // const flashFrames = 3;
+  // const totalFrames = Math.floor((m.durationSec / speed) * m.fps);
+  // const start = Math.floor(rand(0, Math.max(1, totalFrames - flashFrames)));
+  // const end = start + flashFrames - 1;
 
   // Each image appears for 3 frames.
   const flashFrames = 3
 
-  const totalFrames = Math.floor((media.durationSec / speed) * media.fps)
+  // Images must be at least 2 seconds apart.
 
-  const flashStarts = makeFlashStarts(totalFrames, flashImages.length, flashFrames)
+  const totalFrames = Math.floor((m.durationSec / speed) * m.fps)
+
+  const flashStarts = makeFlashStarts(totalFrames, flashImg.length, flashFrames, m.fps)
 
   const filters = [
-    `[0:v]setpts=PTS/${speed},fps=${media.fps},` +
-      `crop=iw/${zoom}:ih/${zoom},` +
-      `scale=${media.width}:${media.height},` +
-      `colortemperature=temperature=${temperature}:mix=${temperatureMix},` +
+    `[0:v]setpts=PTS/${speed},` +
+      `eq=brightness=${brightness},` +
+      `colortemperature=temperature=${colorTemperature}:mix=1,` +
       `eq=brightness=${brightness}:contrast=${contrast}:saturation=${saturation},` +
-      `colorbalance=rs=${redLift}:gs=${greenLift}:bs=${blueLift},` +
-      `vignette=angle=${vignetteAngle},` +
+      `colorbalance=` +
+      `rs=${colorGrade.shadowsRed}:` +
+      `gs=${colorGrade.shadowsGreen}:` +
+      `bs=${colorGrade.shadowsBlue}:` +
+      `rm=${colorGrade.midtonesRed}:` +
+      `gm=${colorGrade.midtonesGreen}:` +
+      `bm=${colorGrade.midtonesBlue}:` +
+      `rh=${colorGrade.highlightsRed}:` +
+      `gh=${colorGrade.highlightsGreen}:` +
+      `bh=${colorGrade.highlightsBlue},` +
+      `crop=iw/${zoom}:ih/${zoom},` +
+      `scale=${m.width}:${m.height},` +
       `${flip ? 'hflip,' : ''}` +
+      `vignette=angle=${vignetteAngle},` +
       `format=yuv420p[base]`
+    // `rotate=${rotationRadians}:` +
+    // `ow=rotw(iw):oh=roth(ih):fillcolor=black@0,` +
+
+    // `[1:v]scale=${m.width}:${m.height}[img]`,
+
+    // `[base][img]overlay=shortest=1:enable='between(n,${start},${end})'[v]`,
   ]
 
-  for (let index = 0; index < flashImages.length; index++) {
+  for (let index = 0; index < flashImg.length; index++) {
     const inputIndex = index + 1
 
     filters.push(
       `[${inputIndex}:v]` +
-        `scale=${media.width}:${media.height}:` +
-        `force_original_aspect_ratio=decrease,` +
-        `pad=${media.width}:${media.height}:` +
-        `(ow-iw)/2:(oh-ih)/2:color=black` +
+        `scale=${m.width}:${m.height}:force_original_aspect_ratio=increase,` +
+        `crop=${m.width}:${m.height}:(iw-ow)/2:(ih-oh)/2` +
         `[image${index}]`
     )
   }
 
   let previousVideo = '[base]'
 
-  for (let index = 0; index < flashImages.length; index++) {
+  for (let index = 0; index < flashImg.length; index++) {
     const start = flashStarts[index]
     const end = start + flashFrames - 1
     const outputLabel = `[video${index}]`
@@ -149,25 +201,21 @@ async function edit(input, flashImages, outFile) {
     previousVideo = outputLabel
   }
 
-  if (media.hasAudio) {
-    filters.push(`[0:a]atempo=${speed}[audio]`)
-  }
+  if (m.hasAudio) filters.push(`[0:a]atempo=${speed}[a]`)
 
   const args = [
     '-y',
-
     '-i',
     input,
 
-    ...flashImages.flatMap((image) => ['-loop', '1', '-i', image]),
+    ...flashImg.flatMap((image) => ['-loop', '1', '-i', image]),
 
     '-filter_complex',
     filters.join(';'),
 
     '-map',
     previousVideo,
-
-    ...(media.hasAudio ? ['-map', '[audio]'] : []),
+    ...(m.hasAudio ? ['-map', '[a]'] : []),
 
     '-c:v',
     'libx264',
@@ -176,68 +224,46 @@ async function edit(input, flashImages, outFile) {
     '-preset',
     'fast',
 
-    ...(media.hasAudio ? ['-c:a', 'aac'] : []),
+    ...(m.hasAudio ? ['-c:a', 'aac'] : []),
 
     '-shortest',
     outFile
   ]
 
-  const startedAt = Date.now()
-
+  const t0 = Date.now()
   try {
-    await run(FFMPEG, args, {
-      maxBuffer: 1024 * 1024 * 50
-    })
-  } catch (error) {
-    console.error(
-      `FAIL ${path.basename(input)}\n` + `${error.stderr?.split('\n').slice(-8).join('\n')}\n`
-    )
+    await run(FFMPEG, args, { maxBuffer: 1024 * 1024 * 50 })
+  } catch (e) {
+    console.log(`FAIL ${path.basename(input)}\n${e.stderr}\n`)
     return
   }
+  const secs = ((Date.now() - t0) / 1000).toFixed(1)
 
-  const encodeSeconds = ((Date.now() - startedAt) / 1000).toFixed(1)
+  // verify the output
+  const o = await probe(outFile)
+  const expected = m.durationSec / speed
+  const problems = []
+  if (Math.abs(o.durationSec - expected) > 0.5)
+    problems.push(`duration ${o.durationSec.toFixed(2)} vs ~${expected.toFixed(2)}`)
+  if (o.width !== m.width || o.height !== m.height) problems.push('resolution changed')
+  if (m.hasAudio && !o.hasAudio) problems.push('audio missing')
 
   console.log(
-    `OK ${path.basename(input)} ` +
-      `images=${flashImages.length} ` +
+    `${problems.length ? 'WARN' : 'OK  '}  ${path.basename(input)}  ` +
+      `images=${flashImg.length} ` +
       `flashFrames=${flashFrames} ` +
       `flashStarts=${flashStarts.join(',')} ` +
       `speed=${speed.toFixed(3)} ` +
       `brightness=${brightness.toFixed(3)} ` +
       `contrast=${contrast.toFixed(3)} ` +
       `saturation=${saturation.toFixed(3)} ` +
-      `temperature=${temperature.toFixed(0)}K ` +
+      `temperature=${colorTemperature.toFixed(0)}K ` +
       `flip=${flip} ` +
-      `encode=${encodeSeconds}s`
-  )
-
-  const output = await probe(outFile)
-  const expectedDuration = media.durationSec / speed
-  const problems = []
-
-  if (Math.abs(output.durationSec - expectedDuration) > 0.5) {
-    problems.push(
-      `duration ${output.durationSec.toFixed(2)} ` +
-        `vs approximately ${expectedDuration.toFixed(2)}`
-    )
-  }
-
-  if (output.width !== media.width || output.height !== media.height) {
-    problems.push('resolution changed')
-  }
-
-  if (media.hasAudio && !output.hasAudio) {
-    problems.push('audio missing')
-  }
-
-  console.log(
-    `${problems.length ? 'WARN' : 'OK'} ${path.basename(input)}` +
-      (problems.length ? ` PROBLEMS: ${problems.join('; ')}` : '')
+      `encode=${secs}s`,
+    `fps=${m.fps}`,
+    problems.length ? `  PROBLEMS: ${problems.join('; ')}` : ''
   )
 }
-
-// Usage:
-// node spike.mjs image1.png image2.jpg image3.png -- video1.mp4 video2.mp4
 
 const commandArgs = process.argv.slice(2)
 const separatorIndex = commandArgs.indexOf('--')
@@ -260,8 +286,29 @@ if (!videoInputs.length) {
   process.exit(1)
 }
 
-for (const input of videoInputs) {
-  const output = path.join(outDir, `${path.parse(input).name}_edited.mp4`)
+// for (const input of videoInputs) {
+//   const output = path.join(outDir, `${path.parse(input).name}_edited.mp4`);
 
-  await edit(input, flashImages, output)
+//   await edit(input, flashImages, output);
+// }
+
+const variantCount = 4
+
+for (const input of videoInputs) {
+  const baseName = path.parse(input).name
+
+  for (let variant = 1; variant <= variantCount; variant++) {
+    const output = path.join(outDir, `${baseName}_edited_${variant}.mp4`)
+
+    await edit(input, flashImages, output)
+  }
 }
+
+// const [flashImg, ...inputs] = process.argv.slice(2);
+// for (const input of inputs) {
+//   await edit(
+//     input,
+//     flashImg,
+//     path.join("out", `${path.parse(input).name}_edited.mp4`),
+//   );
+// }

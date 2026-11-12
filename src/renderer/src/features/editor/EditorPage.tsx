@@ -11,9 +11,15 @@ import type { EditorApi } from './useEditorSettings'
 export interface EditorPageProps {
   editor: EditorApi
   sources: readonly SourceVideo[]
+  /** The imported pool. */
   flashImages: readonly FlashImage[]
-  /** Shown when some picked images were dropped by the limit. */
+  /** Ids of the pool images that are flashed on export. */
+  selectedFlashIds: readonly string[]
+  /** Shown when some picked images were skipped as duplicates. */
   flashNotice: string | null
+  /** Times each flash image appears per video. */
+  flashRepeats: number
+  onChangeFlashRepeats: (value: number) => void
   presets: readonly CaptionPreset[]
   music: readonly MusicTrack[]
   isGenerating: boolean
@@ -22,6 +28,7 @@ export interface EditorPageProps {
   exportError: string | null
   onPickFlashImages: () => void
   onRemoveFlashImage: (id: string) => void
+  onToggleFlashImage: (id: string) => void
   onImportVideos: () => void
   onRemoveSource: (id: string) => void
   onAddPreset: (text: string) => void
@@ -36,7 +43,10 @@ export function EditorPage({
   editor,
   sources,
   flashImages,
+  selectedFlashIds,
   flashNotice,
+  flashRepeats,
+  onChangeFlashRepeats,
   presets,
   music,
   isGenerating,
@@ -44,6 +54,7 @@ export function EditorPage({
   exportError,
   onPickFlashImages,
   onRemoveFlashImage,
+  onToggleFlashImage,
   onImportVideos,
   onRemoveSource,
   onAddPreset,
@@ -73,7 +84,10 @@ export function EditorPage({
         <div className="editor__columns">
           <MediaColumn
             flashImages={flashImages}
+            selectedFlashIds={selectedFlashIds}
             flashNotice={flashNotice}
+            flashRepeats={flashRepeats}
+            onChangeFlashRepeats={onChangeFlashRepeats}
             missingPaths={missingPaths}
             sources={sources}
             activeSourceId={activeSource?.id ?? null}
@@ -81,6 +95,7 @@ export function EditorPage({
             activePresetId={activePreset?.id ?? null}
             onPickFlashImages={onPickFlashImages}
             onRemoveFlashImage={onRemoveFlashImage}
+            onToggleFlashImage={onToggleFlashImage}
             onImportVideos={onImportVideos}
             onSelectSource={actions.setActiveSource}
             onRemoveSource={onRemoveSource}
@@ -89,6 +104,10 @@ export function EditorPage({
             }}
             onAddPreset={onAddPreset}
             onDeletePreset={onDeletePreset}
+            syncCaption={settings.syncCaption}
+            onToggleSyncCaption={(enabled) =>
+              actions.setSyncCaption(enabled, activeSource?.id ?? null)
+            }
           />
           <PreviewColumn
             source={activeSource}
@@ -96,6 +115,9 @@ export function EditorPage({
             caption={activePreset?.text ?? ''}
             settings={activeSourceSettings}
             music={activeMusic}
+            onMoveText={(position) => {
+              if (activeSource) actions.patchText(activeSource.id, { position })
+            }}
           />
           <SettingsColumn
             editor={editor}
