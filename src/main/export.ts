@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process'
 import { mkdir, stat, unlink, writeFile } from 'node:fs/promises'
+import { availableParallelism } from 'node:os'
 import { basename, join, parse } from 'node:path'
 import { promisify } from 'node:util'
 import { shell } from 'electron'
@@ -28,6 +29,8 @@ const OUTPUT_WIDTHS = { low: 480, medium: 720, high: 1080 } as const
 const OUTPUT_CRFS = { low: 28, medium: 23, high: 18 } as const
 const PROBE_TIMEOUT_MS = 60_000
 const EXPORT_TIMEOUT_MS = 30 * 60_000
+/** Parallel renders. One ffmpeg can't keep 8+ cores busy at these sizes; below that, two would only compete. */
+const EXPORT_CONCURRENCY = availableParallelism() >= 8 ? 2 : 1
 
 interface ProbeResult {
   width: number
@@ -221,10 +224,12 @@ function buildFilters(
   const textScale = output.width / 1080
   const fontSize = Math.max(1, Math.round(settings.text.size * textScale))
   const outlineWidth = Math.max(0, Math.round(settings.text.outline * textScale))
+  // Rotate the full frame first and crop afterwards. Rotating the already-cropped frame leaves black wedges
+  // in its corners; the preview never shows them because the zoomed video fills the frame. Skipped at 0, where
+  // it would only cost a full-resolution pass.
+  const rotate = video.rotation !== 0 ? `,rotate=${video.rotation}*PI/180:fillcolor=black` : ''
   const filters = [
-    // Rotate the full frame first and crop afterwards. Rotating the already-cropped frame leaves black wedges
-    // in its corners; the preview never shows them because the zoomed video fills the frame.
-    `[0:v]setpts=(PTS-STARTPTS)/${speed},rotate=${video.rotation}*PI/180:fillcolor=black,crop=min(iw\\,ih*${portraitAspect})/${zoom}:min(ih\\,iw/${portraitAspect})/${zoom}:(iw-ow)/2:(ih-oh)/2,scale=${output.width}:${output.height}`
+    `[0:v]setpts=(PTS-STARTPTS)/${speed}${rotate},crop=min(iw\\,ih*${portraitAspect})/${zoom}:min(ih\\,iw/${portraitAspect})/${zoom}:(iw-ow)/2:(ih-oh)/2,scale=${output.width}:${output.height}`
   ]
 
   const perspective = perspectiveFilter(video.perspective, output.width, output.height)
@@ -234,36 +239,46 @@ function buildFilters(
   if (video.brightness !== 0 || video.contrast !== 1 || video.saturation !== 1) {
     filters[0] += `,eq=brightness=${video.brightness}:contrast=${video.contrast}:saturation=${video.saturation}`
   }
-  // Explicit YUV->RGB with the source's own matrix and range (see OUTPUT_COLOR_ARGS).
-  filters[0] += `,scale=in_color_matrix=${source.colorMatrix}:in_range=${source.colorRange},format=gbrp`
-  if (video.temperature !== TEMPERATURE_KELVIN.neutral) {
-    // The stored value is already Kelvin, so it goes to FFmpeg unchanged.
-    const temperature = Math.max(1000, Math.min(40000, video.temperature))
-    filters[0] += `,colortemperature=temperature=${temperature}:mix=${TEMPERATURE_MIX}`
-  }
+  const hasTemperature = video.temperature !== TEMPERATURE_KELVIN.neutral
   // Vignette is the lens angle in radians; larger = stronger, 0 = off.
-  if (video.vignette > 0) filters[0] += `,vignette=angle=${video.vignette}`
-  filters[0] += ',scale=out_color_matrix=bt709:out_range=tv,format=yuv420p[base]'
+  const hasVignette = video.vignette > 0
+  if (hasTemperature || hasVignette) {
+    // Explicit YUV->RGB with the source's own matrix and range (see OUTPUT_COLOR_ARGS).
+    filters[0] += `,scale=in_color_matrix=${source.colorMatrix}:in_range=${source.colorRange},format=gbrp`
+    if (hasTemperature) {
+      // The stored value is already Kelvin, so it goes to FFmpeg unchanged.
+      const temperature = Math.max(1000, Math.min(40000, video.temperature))
+      filters[0] += `,colortemperature=temperature=${temperature}:mix=${TEMPERATURE_MIX}`
+    }
+    if (hasVignette) filters[0] += `,vignette=angle=${video.vignette}`
+    filters[0] += ',scale=out_color_matrix=bt709:out_range=tv,format=yuv420p[base]'
+  } else {
+    // No RGB filter: convert straight to BT.709 limited YUV, skipping the RGB round trip.
+    filters[0] += `,scale=in_color_matrix=${source.colorMatrix}:in_range=${source.colorRange}:out_color_matrix=bt709:out_range=tv,format=yuv420p[base]`
+  }
 
-  // One decoded input per image, split into one stream per repeat so each flash has its own overlay.
+  // Each image is a single decoded frame, scaled once. Overlay's default eof_action=repeat keeps it available.
   for (let index = 0; index < images.length; index += 1) {
-    const inputIndex = index + 1
-    const copies = Array.from({ length: repeats }, (_, copy) => `[image${index}_${copy}]`).join('')
     filters.push(
-      `[${inputIndex}:v]scale=${output.width}:${output.height}:force_original_aspect_ratio=increase,crop=${output.width}:${output.height},setsar=1,split=${repeats}${copies}`
+      `[${index + 1}:v]scale=${output.width}:${output.height}:force_original_aspect_ratio=increase,crop=${output.width}:${output.height},setsar=1[image${index}]`
     )
   }
 
-  // Overlays are chained in time order, one per flash.
-  let previousLabel = '[base]'
+  // One overlay per image, enabled on every window dealt to it.
   const flashWindows: string[] = []
-  occurrences.forEach(({ image, copy }, slot) => {
+  const windowsByImage: string[][] = images.map(() => [])
+  occurrences.forEach(({ image }, slot) => {
     const start = starts[slot]
     const window = `between(n,${start},${start + FLASH_FRAMES - 1})`
     flashWindows.push(window)
-    const outputLabel = `[flash${slot}]`
+    windowsByImage[image].push(window)
+  })
+  let previousLabel = '[base]'
+  windowsByImage.forEach((windows, image) => {
+    if (windows.length === 0) return
+    const outputLabel = `[flash${image}]`
     filters.push(
-      `${previousLabel}[image${image}_${copy}]overlay=shortest=1:enable='${window}'${outputLabel}`
+      `${previousLabel}[image${image}]overlay=eof_action=repeat:enable='${windows.join('+')}'${outputLabel}`
     )
     previousLabel = outputLabel
   })
@@ -327,7 +342,7 @@ async function renderSource(
   const music = request.music.find((track) => track.id === settings.audio.musicId)
   const musicInputIndex = 1 + images.length
   const args = ['-n', '-ss', String(Math.max(0, settings.video.trimStart)), '-i', source.sourcePath]
-  for (const image of images) args.push('-loop', '1', '-i', image)
+  for (const image of images) args.push('-i', image)
   if (music) args.push('-stream_loop', '-1', '-i', music.sourcePath)
 
   // Original audio follows the video speed; music is left at its own tempo.
@@ -449,7 +464,6 @@ export async function exportVideos(
 ): Promise<ExportResult> {
   await mkdir(outputDirectory, { recursive: true })
   const images = request.flashImagePaths.slice(0, MAX_FLASH_IMAGES)
-  const outputPaths: string[] = []
   const failures: ExportFailure[] = []
 
   const copies = clampCopies(request.copies)
@@ -474,62 +488,115 @@ export async function exportVideos(
   }
   emit()
 
-  let jobIndex = 0
+  // Checked up front so a missing entry fails the batch before anything renders.
   for (const source of request.sources) {
+    if (!request.sourceSettings[source.id]) throw new Error(`Missing settings for ${source.name}`)
+  }
+
+  const tasks = request.sources.flatMap((source) =>
+    Array.from({ length: copies }, (_, copy) => ({ source, copy }))
+  )
+  const results: Array<string | undefined> = []
+  const skippedSources = new Set<string>()
+  const reservedPaths = new Set<string>()
+  // Cancelling, or an error that stops the batch, also stops the renders still running.
+  const batch = new AbortController()
+  const abortBatch = (): void => batch.abort()
+  signal.addEventListener('abort', abortBatch, { once: true })
+  let nextTask = 0
+  let batchError: unknown
+
+  const runJob = async (index: number): Promise<void> => {
+    const { source, copy } = tasks[index]
+    // A missing file skipped this source's remaining copies (already marked failed).
+    if (skippedSources.has(source.id)) return
     const baseSettings = request.sourceSettings[source.id]
-    if (!baseSettings) throw new Error(`Missing settings for ${source.name}`)
+    const settings: SourceEditSettings = {
+      ...baseSettings,
+      video: request.videoVariants?.[source.id]?.[copy] ?? baseSettings.video
+    }
+    const outputPath = await uniqueOutputPath(
+      outputDirectory,
+      fileNameFor(source, copy),
+      reservedPaths
+    )
+    // uniqueOutputPath may have added a -1 suffix; show the real name.
+    update(index, { status: 'rendering', percent: 0, label: basename(outputPath) })
+    try {
+      await renderSource(
+        request,
+        source,
+        settings,
+        images,
+        outputPath,
+        (percent) => update(index, { percent }),
+        batch.signal
+      )
+      results[index] = outputPath
+      exportedPaths.add(outputPath)
+      update(index, { status: 'done', percent: 100, outputPath })
+    } catch (error) {
+      // ffmpeg may have started writing before it failed.
+      await unlink(outputPath).catch(() => undefined)
+      if (batch.signal.aborted) throw error
+      // A file deleted mid-export skips only this source; other errors still stop the batch.
+      const inputs = sourceInputPaths(request, source)
+      const exists = await Promise.all(inputs.map(pathExists))
+      const missing = inputs.filter((_, i) => !exists[i])
+      if (missing.length === 0) throw error
 
-    for (let copy = 0; copy < copies; copy += 1, jobIndex += 1) {
-      if (signal.aborted) throw new Error('Export cancelled')
-
-      const settings: SourceEditSettings = {
-        ...baseSettings,
-        video: request.videoVariants?.[source.id]?.[copy] ?? baseSettings.video
-      }
-      const outputPath = await uniqueOutputPath(outputDirectory, fileNameFor(source, copy))
-      const current = jobIndex
-      // uniqueOutputPath may have added a -1 suffix; show the real name.
-      update(current, { status: 'rendering', percent: 0, label: basename(outputPath) })
-      try {
-        await renderSource(
-          request,
-          source,
-          settings,
-          images,
-          outputPath,
-          (percent) => update(current, { percent }),
-          signal
-        )
-        outputPaths.push(outputPath)
-        exportedPaths.add(outputPath)
-        update(current, { status: 'done', percent: 100, outputPath })
-      } catch (error) {
-        if (signal.aborted) throw error
-        // A file deleted mid-export skips only this source; other errors still stop the batch.
-        const inputs = sourceInputPaths(request, source)
-        const exists = await Promise.all(inputs.map(pathExists))
-        const missing = inputs.filter((_, i) => !exists[i])
-        if (missing.length === 0) throw error
-
-        // ffmpeg may have started writing before it failed.
-        await unlink(outputPath).catch(() => undefined)
-        const message = `File missing: ${missing.map((p) => basename(p)).join(', ')}`
+      const message = `File missing: ${missing.map((p) => basename(p)).join(', ')}`
+      if (!skippedSources.has(source.id)) {
+        skippedSources.add(source.id)
         failures.push({ sourceId: source.id, sourceName: source.name, error: message })
-        // The file won't come back for the remaining copies, so skip them.
-        for (let skipped = current; skipped < current + copies - copy; skipped += 1) {
-          jobs[skipped] = { ...jobs[skipped], status: 'failed', error: message }
+      }
+      // The file won't come back for the remaining copies, so skip them.
+      tasks.forEach((task, other) => {
+        if (task.source.id !== source.id) return
+        if (other === index || jobs[other].status === 'queued') {
+          jobs[other] = { ...jobs[other], status: 'failed', error: message }
         }
-        emit()
-        jobIndex = current + copies - copy
-        break
+      })
+      emit()
+    }
+  }
+
+  const worker = async (): Promise<void> => {
+    while (nextTask < tasks.length && !batch.signal.aborted) {
+      const index = nextTask
+      nextTask += 1
+      try {
+        await runJob(index)
+      } catch (error) {
+        if (batchError === undefined) batchError = error
+        batch.abort()
       }
     }
   }
 
+  try {
+    await Promise.all(
+      Array.from({ length: Math.min(EXPORT_CONCURRENCY, tasks.length) }, () => worker())
+    )
+  } finally {
+    signal.removeEventListener('abort', abortBatch)
+  }
+  if (batchError !== undefined) throw batchError
+  if (signal.aborted) throw new Error('Export cancelled')
+
+  const outputPaths = results.filter((path): path is string => path !== undefined)
   return { outputPaths, failures }
 }
 
-async function uniqueOutputPath(directory: string, fileName: string): Promise<string> {
+/**
+ * First free `<name>[-N].ext` in the directory. `reserved` holds paths already handed to a running job, so two
+ * parallel renders never get the same name. Checked after the stat, so check-and-add has no await in between.
+ */
+async function uniqueOutputPath(
+  directory: string,
+  fileName: string,
+  reserved: Set<string>
+): Promise<string> {
   const parsed = parse(fileName)
   let suffix = 0
 
@@ -540,9 +607,12 @@ async function uniqueOutputPath(directory: string, fileName: string): Promise<st
     )
     try {
       await stat(candidate)
-      suffix += 1
     } catch {
-      return candidate
+      if (!reserved.has(candidate)) {
+        reserved.add(candidate)
+        return candidate
+      }
     }
+    suffix += 1
   }
 }
