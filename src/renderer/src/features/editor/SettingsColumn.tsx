@@ -55,238 +55,247 @@ export function SettingsColumn({
   return (
     <div className="editor__col editor__col--settings">
       <fieldset className="fieldset-contents" disabled={sourceId === null}>
-      <Panel title="Font">
-        <label className="checkbox-field">
-          <input
-            type="checkbox"
-            checked={settings.syncText}
-            onChange={(event) => actions.setSyncText(event.target.checked, sourceId)}
-          />
-          <span>Same caption style and position on all videos</span>
-        </label>
-        {settings.syncText && (
-          <p className="field-hint">Edits apply to every video. Caption text stays per video.</p>
-        )}
-        <div className="font-grid" role="radiogroup" aria-label="Typeface">
-          {FONTS.map((font) => (
-            <button
-              key={font.id}
-              type="button"
-              role="radio"
-              aria-checked={text.font === font.id}
-              className={`font-card${text.font === font.id ? ' font-card--selected' : ''}`}
-              onClick={() => sourceId && actions.patchText(sourceId, { font: font.id })}
-            >
-              <span className="font-card__sample" style={fontStyle(font.id)}>
-                Aa
-              </span>
-              <span className="font-card__name">{font.label}</span>
-            </button>
-          ))}
-        </div>
-        <Segmented
-          legend="Case"
-          options={TEXT_CASE_OPTIONS}
-          value={text.textCase}
-          onChange={(textCase) => sourceId && actions.patchText(sourceId, { textCase })}
-        />
-      </Panel>
-
-      <Panel title="Text size and outline">
-        <Slider
-          label="Size"
-          value={text.size}
-          min={24}
-          max={120}
-          step={1}
-          unit="px"
-          onChange={(size) => sourceId && actions.patchText(sourceId, { size })}
-        />
-        <Slider
-          label="Outline"
-          value={text.outline}
-          min={0}
-          max={12}
-          step={1}
-          unit="px"
-          onChange={(outline) => sourceId && actions.patchText(sourceId, { outline })}
-        />
-      </Panel>
-
-      <Panel title="Text colors">
-        <ColorField
-          label="Fill"
-          value={text.fill}
-          onChange={(fill) => sourceId && actions.patchText(sourceId, { fill })}
-        />
-        <ColorField
-          label="Outline"
-          value={text.outlineColor}
-          onChange={(outlineColor) => sourceId && actions.patchText(sourceId, { outlineColor })}
-        />
-      </Panel>
-
-      <Panel
-        title="Text position"
-        actions={
-          text.position ? (
-            <Button
-              size="sm"
-              variant="ghost"
-              icon="reset"
-              onClick={() => sourceId && actions.patchText(sourceId, { position: null })}
-            >
-              Reset
-            </Button>
-          ) : undefined
-        }
-      >
-        <p className="field-hint">
-          {text.position
-            ? 'Custom position (dragged). Pick an option below to snap back.'
-            : 'Drag the text in the preview to place it freely.'}
-        </p>
-        <Segmented
-          legend="Vertical"
-          options={VERTICAL_OPTIONS}
-          value={text.vAlign}
-          onChange={(vAlign) => sourceId && actions.patchText(sourceId, { vAlign, position: null })}
-        />
-        <Segmented
-          legend="Horizontal"
-          options={HORIZONTAL_OPTIONS}
-          value={text.hAlign}
-          onChange={(hAlign) => sourceId && actions.patchText(sourceId, { hAlign, position: null })}
-        />
-      </Panel>
-
-      <Panel
-        title="Video properties"
-        actions={
-          <>
-            <Button
-              size="sm"
-              variant="ghost"
-              icon="reset"
-              disabled={locked}
-              onClick={() => sourceId && actions.resetVideo(sourceId)}
-            >
-              Reset
-            </Button>
-            <Button
-              size="sm"
-              icon="dice"
-              disabled={locked}
-              onClick={() => sourceId && actions.randomizeVideo(sourceId)}
-            >
-              Randomize
-            </Button>
-          </>
-        }
-      >
-        {VIDEO_CONTROL_GROUPS.map((group) => (
-          <Fragment key={group.id}>
-            <h3 className="field-group-title">{group.label}</h3>
-            {group.id === 'transform' && (
-              <label className="checkbox-field">
-                <input
-                  type="checkbox"
-                  checked={video.flip}
-                  disabled={locked}
-                  onChange={(event) =>
-                    sourceId && actions.setVideoFlip(sourceId, event.target.checked)
-                  }
-                />
-                <span>Flip horizontally</span>
-              </label>
-            )}
-            {VIDEO_CONTROLS.filter((control) => control.group === group.id).map((control) => (
-              <Slider
-                key={control.key}
-                label={control.label}
-                value={toDisplay(control, video[control.key])}
-                min={control.display?.min ?? control.min}
-                max={control.display?.max ?? control.max}
-                step={control.display ? 1 : control.step}
-                unit={control.unit}
-                format={control.format}
-                disabled={locked}
-                onChange={(value) =>
-                  sourceId &&
-                  actions.setVideoProp(sourceId, control.key, fromDisplay(control, value))
-                }
-              />
+        <Panel title="Font">
+          <label className="checkbox-field">
+            <input
+              type="checkbox"
+              checked={settings.syncText}
+              onChange={(event) => actions.setSyncText(event.target.checked, sourceId)}
+            />
+            <span>Same caption style and position on all videos</span>
+          </label>
+          {settings.syncText && (
+            <p className="field-hint">Edits apply to every video. Caption text stays per video.</p>
+          )}
+          <div className="font-grid" role="radiogroup" aria-label="Typeface">
+            {FONTS.map((font) => (
+              <button
+                key={font.id}
+                type="button"
+                role="radio"
+                aria-checked={text.font === font.id}
+                className={`font-card${text.font === font.id ? ' font-card--selected' : ''}`}
+                onClick={() => sourceId && actions.patchText(sourceId, { font: font.id })}
+              >
+                <span className="font-card__sample" style={fontStyle(font.id)}>
+                  Aa
+                </span>
+                <span className="font-card__name">{font.label}</span>
+              </button>
             ))}
-          </Fragment>
-        ))}
-        <label className="checkbox-field">
-          <input
-            type="checkbox"
-            checked={locked}
-            onChange={(event) => actions.setFullRandomize(event.target.checked)}
+          </div>
+          <Segmented
+            legend="Case"
+            options={TEXT_CASE_OPTIONS}
+            value={text.textCase}
+            onChange={(textCase) => sourceId && actions.patchText(sourceId, { textCase })}
           />
-          <span>Fully randomize each copy</span>
-        </label>
-        {locked && (
-          <p className="field-hint">
-            Every exported copy of every video gets its own random values. Manual edits are locked.
-          </p>
-        )}
-      </Panel>
+        </Panel>
 
-      <Panel title="Audio">
-        <label className="checkbox-field">
-          <input
-            type="checkbox"
-            checked={audio.originalEnabled}
-            onChange={(event) =>
-              sourceId && actions.setOriginalAudio(sourceId, event.target.checked)
+        <Panel title="Text size and outline">
+          <Slider
+            label="Size"
+            value={text.size}
+            min={24}
+            max={120}
+            step={1}
+            unit="px"
+            onChange={(size) => sourceId && actions.patchText(sourceId, { size })}
+          />
+          <Slider
+            label="Outline"
+            value={text.outline}
+            min={0}
+            max={12}
+            step={1}
+            unit="px"
+            onChange={(outline) => sourceId && actions.patchText(sourceId, { outline })}
+          />
+        </Panel>
+
+        <Panel title="Text colors">
+          <ColorField
+            label="Fill"
+            value={text.fill}
+            onChange={(fill) => sourceId && actions.patchText(sourceId, { fill })}
+          />
+          <ColorField
+            label="Outline"
+            value={text.outlineColor}
+            onChange={(outlineColor) => sourceId && actions.patchText(sourceId, { outlineColor })}
+          />
+        </Panel>
+
+        <Panel
+          title="Text position"
+          actions={
+            text.position ? (
+              <Button
+                size="sm"
+                variant="ghost"
+                icon="reset"
+                onClick={() => sourceId && actions.patchText(sourceId, { position: null })}
+              >
+                Reset
+              </Button>
+            ) : undefined
+          }
+        >
+          <p className="field-hint">
+            {text.position
+              ? 'Custom position (dragged). Pick an option below to snap back.'
+              : 'Drag the text in the preview to place it freely.'}
+          </p>
+          <Segmented
+            legend="Vertical"
+            options={VERTICAL_OPTIONS}
+            value={text.vAlign}
+            onChange={(vAlign) =>
+              sourceId && actions.patchText(sourceId, { vAlign, position: null })
             }
           />
-          <span>Keep original audio</span>
-        </label>
-      </Panel>
-
-      <Panel
-        title="Music"
-        actions={
-          <Button size="sm" icon="plus" onClick={onImportMusic}>
-            Import audio
-          </Button>
-        }
-      >
-        {music.length === 0 ? (
-          <EmptyState icon="music" title="No audio yet" hint="Import an mp3 or other audio file." />
-        ) : (
-          <RadioList
-            legend="Background music"
-            noneLabel="No music"
-            selectedId={activeMusicId}
-            onSelect={(id) => sourceId && actions.setMusic(sourceId, id)}
-            onDelete={onRemoveMusic}
-            items={music.map((track) => {
-              const missing = missingPaths.has(track.sourcePath)
-              return {
-                id: track.id,
-                label: track.name,
-                meta: missing ? 'File missing' : formatDuration(track.durationSec),
-                missing
-              }
-            })}
+          <Segmented
+            legend="Horizontal"
+            options={HORIZONTAL_OPTIONS}
+            value={text.hAlign}
+            onChange={(hAlign) =>
+              sourceId && actions.patchText(sourceId, { hAlign, position: null })
+            }
           />
-        )}
-      </Panel>
+        </Panel>
 
-      <Panel title="Export quality">
-        <Segmented
-          legend="Quality"
-          hideLegend
-          options={QUALITY_OPTIONS}
-          value={settings.quality}
-          onChange={actions.setQuality}
-        />
-        <CopiesField value={settings.copies} onChange={actions.setCopies} />
-      </Panel>
+        <Panel
+          title="Video properties"
+          actions={
+            <>
+              <Button
+                size="sm"
+                variant="ghost"
+                icon="reset"
+                disabled={locked}
+                onClick={() => sourceId && actions.resetVideo(sourceId)}
+              >
+                Reset
+              </Button>
+              <Button
+                size="sm"
+                icon="dice"
+                disabled={locked}
+                onClick={() => sourceId && actions.randomizeVideo(sourceId)}
+              >
+                Randomize
+              </Button>
+            </>
+          }
+        >
+          {VIDEO_CONTROL_GROUPS.map((group) => (
+            <Fragment key={group.id}>
+              <h3 className="field-group-title">{group.label}</h3>
+              {group.id === 'transform' && (
+                <label className="checkbox-field">
+                  <input
+                    type="checkbox"
+                    checked={video.flip}
+                    disabled={locked}
+                    onChange={(event) =>
+                      sourceId && actions.setVideoFlip(sourceId, event.target.checked)
+                    }
+                  />
+                  <span>Flip horizontally</span>
+                </label>
+              )}
+              {VIDEO_CONTROLS.filter((control) => control.group === group.id).map((control) => (
+                <Slider
+                  key={control.key}
+                  label={control.label}
+                  value={toDisplay(control, video[control.key])}
+                  min={control.display?.min ?? control.min}
+                  max={control.display?.max ?? control.max}
+                  step={control.display ? 1 : control.step}
+                  unit={control.unit}
+                  format={control.format}
+                  disabled={locked}
+                  onChange={(value) =>
+                    sourceId &&
+                    actions.setVideoProp(sourceId, control.key, fromDisplay(control, value))
+                  }
+                />
+              ))}
+            </Fragment>
+          ))}
+          <label className="checkbox-field">
+            <input
+              type="checkbox"
+              checked={locked}
+              onChange={(event) => actions.setFullRandomize(event.target.checked)}
+            />
+            <span>Fully randomize each copy</span>
+          </label>
+          {locked && (
+            <p className="field-hint">
+              Every exported copy of every video gets its own random values. Manual edits are
+              locked.
+            </p>
+          )}
+        </Panel>
+
+        <Panel title="Audio">
+          <label className="checkbox-field">
+            <input
+              type="checkbox"
+              checked={audio.originalEnabled}
+              onChange={(event) =>
+                sourceId && actions.setOriginalAudio(sourceId, event.target.checked)
+              }
+            />
+            <span>Keep original audio</span>
+          </label>
+        </Panel>
+
+        <Panel
+          title="Music"
+          actions={
+            <Button size="sm" icon="plus" onClick={onImportMusic}>
+              Import audio
+            </Button>
+          }
+        >
+          {music.length === 0 ? (
+            <EmptyState
+              icon="music"
+              title="No audio yet"
+              hint="Import an mp3 or other audio file."
+            />
+          ) : (
+            <RadioList
+              legend="Background music"
+              noneLabel="No music"
+              selectedId={activeMusicId}
+              onSelect={(id) => sourceId && actions.setMusic(sourceId, id)}
+              onDelete={onRemoveMusic}
+              items={music.map((track) => {
+                const missing = missingPaths.has(track.sourcePath)
+                return {
+                  id: track.id,
+                  label: track.name,
+                  meta: missing ? 'File missing' : formatDuration(track.durationSec),
+                  missing
+                }
+              })}
+            />
+          )}
+        </Panel>
+
+        <Panel title="Export quality">
+          <Segmented
+            legend="Quality"
+            hideLegend
+            options={QUALITY_OPTIONS}
+            value={settings.quality}
+            onChange={actions.setQuality}
+          />
+          <CopiesField value={settings.copies} onChange={actions.setCopies} />
+        </Panel>
       </fieldset>
     </div>
   )

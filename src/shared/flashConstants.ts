@@ -1,5 +1,8 @@
-/** Most pool images that can be selected for flashing. Each flashes `flashRepeats` times per video. */
-export const MAX_FLASH_IMAGES = 5
+/** Only one pool image can be selected for flashing. It flashes `flashRepeats` times per video. */
+export const MAX_FLASH_IMAGES = 1
+
+/** Most images that can be imported into the flash image pool. */
+export const MAX_POOL_IMAGES = 100
 
 /** Times each flash image appears per video. */
 export const MIN_FLASH_REPEATS = 1

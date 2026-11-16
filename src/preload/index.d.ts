@@ -14,7 +14,12 @@ import type {
 
 interface AppApi {
   videos: {
+    /** Sources come back without thumbnailUrl; thumbnails arrive later through onThumbnail. */
     import: () => Promise<SourceVideo[]>
+    /** Fires as each picked file is probed during import. */
+    onImportProgress: (listener: (progress: { done: number; total: number }) => void) => () => void
+    /** A source's thumbnail is ready (after import or session load). */
+    onThumbnail: (listener: (update: { id: string; thumbnailUrl: string }) => void) => () => void
   }
   photos: {
     choose: () => Promise<FlashImageSelection | null>

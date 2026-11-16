@@ -16,7 +16,27 @@ import type {
 // Custom APIs for renderer
 const api = {
   videos: {
-    import: (): Promise<SourceVideo[]> => ipcRenderer.invoke('videos:import')
+    import: (): Promise<SourceVideo[]> => ipcRenderer.invoke('videos:import'),
+    onImportProgress: (
+      listener: (progress: { done: number; total: number }) => void
+    ): (() => void) => {
+      const handler = (
+        _event: Electron.IpcRendererEvent,
+        progress: { done: number; total: number }
+      ): void => listener(progress)
+      ipcRenderer.on('videos:import-progress', handler)
+      return () => ipcRenderer.removeListener('videos:import-progress', handler)
+    },
+    onThumbnail: (
+      listener: (update: { id: string; thumbnailUrl: string }) => void
+    ): (() => void) => {
+      const handler = (
+        _event: Electron.IpcRendererEvent,
+        update: { id: string; thumbnailUrl: string }
+      ): void => listener(update)
+      ipcRenderer.on('videos:thumbnail', handler)
+      return () => ipcRenderer.removeListener('videos:thumbnail', handler)
+    }
   },
   photos: {
     choose: (): Promise<FlashImageSelection | null> => ipcRenderer.invoke('photos:choose')

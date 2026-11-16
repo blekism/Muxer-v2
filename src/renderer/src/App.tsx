@@ -9,6 +9,7 @@ import { LibraryPage } from './features/library/LibraryPage'
 import { fileName, pluralize } from './lib/format'
 import {
   MAX_FLASH_IMAGES,
+  MAX_POOL_IMAGES,
   MIN_FLASH_REPEATS,
   clampFlashRepeats
 } from '../../shared/flashConstants'
@@ -61,6 +62,21 @@ function readCollapsed(): boolean {
   }
 }
 
+/** Sources with any ready thumbnail filled in; the same array when nothing changed (no re-render). */
+function withThumbnails(
+  list: SourceVideo[],
+  thumbnails: ReadonlyMap<string, string>
+): SourceVideo[] {
+  let changed = false
+  const next = list.map((source) => {
+    const thumbnailUrl = thumbnails.get(source.id)
+    if (!thumbnailUrl || thumbnailUrl === source.thumbnailUrl) return source
+    changed = true
+    return { ...source, thumbnailUrl }
+  })
+  return changed ? next : list
+}
+
 export default function App() {
   const [page, setPage] = useState<PageId>('editor')
   const [collapsed, setCollapsed] = useState(readCollapsed)
@@ -79,6 +95,11 @@ export default function App() {
   const editor = useEditorSettings()
 
   const [sources, setSources] = useState<SourceVideo[]>([])
+  // Thumbnails main made in the background, by source id, not yet applied to `sources`. Kept until applied
+  // because an event may arrive before the import/session reply that carries its source.
+  const pendingThumbsRef = useRef(new Map<string, string>())
+  const thumbFlushRef = useRef<number | null>(null)
+  const importingRef = useRef(false)
   // The imported pool; only the selected ones are flashed on export.
   const [flashImages, setFlashImages] = useState<FlashImage[]>([])
   const [selectedFlashIds, setSelectedFlashIds] = useState<string[]>([])
@@ -229,7 +250,7 @@ export default function App() {
       .load()
       .then((saved) => {
         if (disposed || !saved) return
-        setSources(saved.sources)
+        setSources(withThumbnails(saved.sources, pendingThumbsRef.current))
         setFlashImages(saved.flashImages)
         setSelectedFlashIds(saved.selectedFlashImageIds.slice(0, MAX_FLASH_IMAGES))
         setFlashRepeats(clampFlashRepeats(saved.flashRepeats || MIN_FLASH_REPEATS))
@@ -245,6 +266,23 @@ export default function App() {
       disposed = true
     }
   }, [hydrate])
+
+  // Thumbnails arrive one by one from main; batch them so 100 imports cause a few renders, not 100.
+  useEffect(() => {
+    const unsubscribe = window.api.videos.onThumbnail(({ id, thumbnailUrl }) => {
+      pendingThumbsRef.current.set(id, thumbnailUrl)
+      if (thumbFlushRef.current !== null) return
+      thumbFlushRef.current = window.setTimeout(() => {
+        thumbFlushRef.current = null
+        setSources((prev) => withThumbnails(prev, pendingThumbsRef.current))
+      }, 150)
+    })
+    return () => {
+      unsubscribe()
+      if (thumbFlushRef.current !== null) window.clearTimeout(thumbFlushRef.current)
+      thumbFlushRef.current = null
+    }
+  }, [])
 
   // Debounced: sliders change settings many times a second.
   useEffect(() => {
@@ -268,6 +306,7 @@ export default function App() {
     (ids: string[]) => {
       if (ids.length === 0) return
       const removed = new Set(ids)
+      for (const id of ids) pendingThumbsRef.current.delete(id)
       setSources((prev) => prev.filter((source) => !removed.has(source.id)))
       removeSourceSettings(ids)
     },
@@ -430,12 +469,20 @@ export default function App() {
                     (image) => !existing.has(image.path.toLowerCase())
                   )
                   const duplicates = selection.images.length - fresh.length
-                  setFlashImages([...flashImages, ...fresh])
-                  setFlashNotice(
+                  // The pool holds at most MAX_POOL_IMAGES; extra picks are dropped.
+                  const room = Math.max(0, MAX_POOL_IMAGES - flashImages.length)
+                  const added = fresh.slice(0, room)
+                  const overLimit = fresh.length - added.length
+                  setFlashImages([...flashImages, ...added])
+                  const notices = [
                     duplicates > 0
                       ? `${pluralize(duplicates, 'image')} already imported, skipped.`
+                      : null,
+                    overLimit > 0
+                      ? `Limit is ${MAX_POOL_IMAGES} images, ${pluralize(overLimit, 'image')} not added.`
                       : null
-                  )
+                  ].filter(Boolean)
+                  setFlashNotice(notices.length > 0 ? notices.join(' ') : null)
                 } catch (error) {
                   console.error('Unable to choose flash images', error)
                   toast.error("Couldn't add flash images.")
@@ -448,31 +495,67 @@ export default function App() {
                 setFlashNotice(null)
               }}
               onToggleFlashImage={(id) =>
-                setSelectedFlashIds((prev) => {
-                  if (prev.includes(id)) return prev.filter((selected) => selected !== id)
-                  return prev.length >= MAX_FLASH_IMAGES ? prev : [...prev, id]
-                })
+                // Single selection: clicking the selected image clears it, any other image replaces it.
+                setSelectedFlashIds((prev) => (prev.includes(id) ? [] : [id]))
               }
               onImportVideos={async () => {
+                // One import at a time; the file dialog isn't modal, so the button can be clicked again.
+                if (importingRef.current) return
+                importingRef.current = true
+                let toastId: string | number | undefined
+                const stopProgress = window.api.videos.onImportProgress(({ done, total }) => {
+                  // Small imports finish too fast to need a progress toast.
+                  if (total < 10) return
+                  const message = `Importing videos… ${done} / ${total}`
+                  toastId =
+                    toastId === undefined
+                      ? toast.loading(message)
+                      : toast.loading(message, { id: toastId })
+                })
                 try {
                   const imported = await window.api.videos.import()
-                  if (imported.length === 0) return
+                  if (imported.length === 0) {
+                    if (toastId !== undefined) toast.dismiss(toastId)
+                    return
+                  }
                   // Windows paths are case-insensitive; already-imported videos are skipped.
                   const existing = new Set(sources.map((s) => s.sourcePath.toLowerCase()))
                   const fresh = imported.filter((v) => !existing.has(v.sourcePath.toLowerCase()))
                   const duplicates = imported.filter((v) => !fresh.includes(v))
-                  setSources([...sources, ...fresh])
+                  setSources((prev) => [
+                    ...prev,
+                    ...withThumbnails(fresh, pendingThumbsRef.current)
+                  ])
+                  if (toastId !== undefined) {
+                    if (fresh.length > 0) {
+                      toast.success(`Imported ${pluralize(fresh.length, 'video')}.`, {
+                        id: toastId
+                      })
+                    } else {
+                      toast.dismiss(toastId)
+                    }
+                  }
                   if (duplicates.length === 1) {
                     toast.warning(`${duplicates[0].name} is already imported.`)
                   } else if (duplicates.length > 1) {
-                    toast.warning(`${duplicates.length} videos were already imported and weren't added again.`)
+                    toast.warning(
+                      `${duplicates.length} videos were already imported and weren't added again.`
+                    )
                   }
                 } catch (error) {
                   console.error('Unable to import videos', error)
-                  toast.error("Couldn't import videos.")
+                  if (toastId !== undefined) {
+                    toast.error("Couldn't import videos.", { id: toastId })
+                  } else {
+                    toast.error("Couldn't import videos.")
+                  }
+                } finally {
+                  stopProgress()
+                  importingRef.current = false
                 }
               }}
               onRemoveSource={(id) => removeSources([id])}
+              onRemoveAllSources={() => removeSources(sources.map((source) => source.id))}
               onAddPreset={(text) =>
                 setPresets((prev) => [...prev, { id: crypto.randomUUID(), text }])
               }

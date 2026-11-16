@@ -1,4 +1,4 @@
-import { useId, useState, type FormEvent } from 'react'
+import { useEffect, useId, useState, type FormEvent } from 'react'
 import {
   Button,
   EmptyState,
@@ -12,8 +12,8 @@ import {
 import { formatDuration, pluralize } from '../../lib/format'
 import type { CaptionPreset, FlashImage, SourceVideo } from '../../types'
 import {
-  MAX_FLASH_IMAGES,
   MAX_FLASH_REPEATS,
+  MAX_POOL_IMAGES,
   MIN_FLASH_REPEATS,
   clampFlashRepeats
 } from '../../../../shared/flashConstants'
@@ -35,6 +35,7 @@ interface MediaColumnProps {
   onImportVideos: () => void
   onSelectSource: (id: string) => void
   onRemoveSource: (id: string) => void
+  onRemoveAllSources: () => void
   onSelectPreset: (id: string | null) => void
   onAddPreset: (text: string) => void
   onDeletePreset: (id: string) => void
@@ -63,6 +64,7 @@ export function MediaColumn(props: MediaColumnProps) {
         onImport={props.onImportVideos}
         onSelect={props.onSelectSource}
         onRemove={props.onRemoveSource}
+        onRemoveAll={props.onRemoveAllSources}
       />
       <CaptionsPanel
         presets={props.presets}
@@ -101,7 +103,6 @@ function PhotosPanel({
 }) {
   const missingCount = images.filter((image) => missingPaths.has(image.path)).length
   const selectedCount = images.filter((image) => selectedIds.includes(image.id)).length
-  const full = selectedCount >= MAX_FLASH_IMAGES
   return (
     <Panel
       title="Flash images"
@@ -115,7 +116,8 @@ function PhotosPanel({
         <>
           <div className="folder-info">
             <span className="muted">
-              {selectedCount} / {MAX_FLASH_IMAGES} selected · {pluralize(images.length, 'image')}
+              {selectedCount > 0 ? '1 selected' : 'None selected'} · {images.length} /{' '}
+              {MAX_POOL_IMAGES} images
             </span>
             {missingCount > 0 && (
               <span className="missing-label">{pluralize(missingCount, 'image')} missing</span>
@@ -126,7 +128,6 @@ function PhotosPanel({
             {images.map((image) => {
               const selected = selectedIds.includes(image.id)
               const missing = missingPaths.has(image.path)
-              const blocked = !selected && full
               return (
                 <li
                   key={image.id}
@@ -141,14 +142,7 @@ function PhotosPanel({
                     className="thumb-grid__select"
                     aria-pressed={selected}
                     aria-label={`${selected ? 'Deselect' : 'Select'} ${image.name}`}
-                    disabled={blocked}
-                    title={
-                      blocked
-                        ? `${MAX_FLASH_IMAGES} images selected. Deselect one to pick another.`
-                        : missing
-                          ? `${image.name} (missing)`
-                          : image.name
-                    }
+                    title={missing ? `${image.name} (missing)` : image.name}
                     onClick={() => onToggle(image.id)}
                   >
                     <Thumb src={image.url} alt="" />
@@ -170,8 +164,8 @@ function PhotosPanel({
           </ul>
           <p className="field-hint">
             {selectedCount === 0
-              ? 'No images selected, so nothing will flash. Click images to choose which ones flash.'
-              : 'Click images to choose which ones flash.'}
+              ? 'No image selected, so nothing will flash. Click an image to choose the one that flashes.'
+              : 'Click another image to flash it instead, or click the selected one to clear it.'}
           </p>
           <FlashRepeatsField value={repeats} onChange={onChangeRepeats} />
         </>
@@ -179,7 +173,7 @@ function PhotosPanel({
         <EmptyState
           icon="image"
           title="No images yet"
-          hint={`Add images, then select up to ${MAX_FLASH_IMAGES} to flash at random points in the video.`}
+          hint={`Add up to ${MAX_POOL_IMAGES} images, then select one to flash at random points in the video.`}
         />
       )}
     </Panel>
@@ -200,7 +194,7 @@ function FlashRepeatsField({
   return (
     <div className="field copies-field">
       <label className="field-label" htmlFor={id}>
-        Flashes per image
+        Flashes per video
       </label>
       <input
         id={id}
@@ -220,7 +214,7 @@ function FlashRepeatsField({
         }
       />
       <p className="field-hint">
-        Each selected image flashes {pluralize(shown, 'time')} at random points in the video.
+        The selected image flashes {pluralize(shown, 'time')} at random points in the video.
       </p>
     </div>
   )
@@ -233,7 +227,11 @@ interface SourcesPanelProps {
   onImport: () => void
   onSelect: (id: string) => void
   onRemove: (id: string) => void
+  onRemoveAll: () => void
 }
+
+/** How long the "Remove all" button waits for its confirming second click. */
+const CONFIRM_REMOVE_ALL_MS = 4000
 
 function SourcesPanel({
   sources,
@@ -241,15 +239,52 @@ function SourcesPanel({
   activeId,
   onImport,
   onSelect,
-  onRemove
+  onRemove,
+  onRemoveAll
 }: SourcesPanelProps) {
+  // Removing every video takes two clicks: the first arms the button, the second removes.
+  const [confirmingRemoveAll, setConfirmingRemoveAll] = useState(false)
+  useEffect(() => {
+    if (!confirmingRemoveAll) return
+    const timer = window.setTimeout(() => setConfirmingRemoveAll(false), CONFIRM_REMOVE_ALL_MS)
+    return () => window.clearTimeout(timer)
+  }, [confirmingRemoveAll])
+
   return (
     <Panel
       title="Source videos"
       actions={
-        <Button size="sm" icon="plus" onClick={onImport}>
-          Import
-        </Button>
+        <>
+          {sources.length > 0 &&
+            (confirmingRemoveAll ? (
+              <Button
+                size="sm"
+                variant="danger"
+                icon="trash"
+                onClick={() => {
+                  setConfirmingRemoveAll(false)
+                  onRemoveAll()
+                }}
+                onBlur={() => setConfirmingRemoveAll(false)}
+                autoFocus
+              >
+                Remove {pluralize(sources.length, 'video')}?
+              </Button>
+            ) : (
+              <Button
+                size="sm"
+                variant="ghost"
+                icon="trash"
+                title="Remove all source videos from the app (files stay on disk)"
+                onClick={() => setConfirmingRemoveAll(true)}
+              >
+                Remove all
+              </Button>
+            ))}
+          <Button size="sm" icon="plus" onClick={onImport}>
+            Import
+          </Button>
+        </>
       }
     >
       {sources.length === 0 ? (

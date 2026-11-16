@@ -31,6 +31,7 @@ export interface EditorPageProps {
   onToggleFlashImage: (id: string) => void
   onImportVideos: () => void
   onRemoveSource: (id: string) => void
+  onRemoveAllSources: () => void
   onAddPreset: (text: string) => void
   onDeletePreset: (id: string) => void
   onImportMusic: () => void
@@ -57,6 +58,7 @@ export function EditorPage({
   onToggleFlashImage,
   onImportVideos,
   onRemoveSource,
+  onRemoveAllSources,
   onAddPreset,
   onDeletePreset,
   onImportMusic,
@@ -99,6 +101,7 @@ export function EditorPage({
             onImportVideos={onImportVideos}
             onSelectSource={actions.setActiveSource}
             onRemoveSource={onRemoveSource}
+            onRemoveAllSources={onRemoveAllSources}
             onSelectPreset={(id) => {
               if (activeSource) actions.setCaptionPreset(activeSource.id, id)
             }}

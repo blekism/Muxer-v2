@@ -10,7 +10,9 @@ Sits between the main process (`src/main/index.ts`) and the renderer. It is the 
 
     | `window.api` method | IPC channel | Returns |
     | --- | --- | --- |
-    | `videos.import()` | `videos:import` | `SourceVideo[]` |
+    | `videos.import()` | `videos:import` | `SourceVideo[]` (without `thumbnailUrl`) |
+    | `videos.onImportProgress(listener)` | `videos:import-progress` (event, `{ done, total }`) | unsubscribe function |
+    | `videos.onThumbnail(listener)` | `videos:thumbnail` (event, `{ id, thumbnailUrl }`) | unsubscribe function |
     | `photos.choose()` | `photos:choose` | `FlashImageSelection | null` |
     | `library.load()` | `library:load` | `SavedEditorLibrary` |
     | `library.save(library)` | `library:save` | `void` |
@@ -28,7 +30,7 @@ Sits between the main process (`src/main/index.ts`) and the renderer. It is the 
     | `downloads.onUpdate(listener)` | `downloads:update` (event) | unsubscribe function |
     | `downloads.removeMany(ids)` | `downloads:remove-many` | `boolean` (false if the user cancelled); permanently deletes the files |
 
-  - `export.onProgress` and `downloads.onUpdate` are the push channels. Each subscribes with `ipcRenderer.on` and returns a function that removes the listener. Callers must invoke it on cleanup.
+  - `videos.onImportProgress`, `videos.onThumbnail`, `export.onProgress` and `downloads.onUpdate` are the push channels. Each subscribes with `ipcRenderer.on` and returns a function that removes the listener. Callers must invoke it on cleanup.
 - **`index.d.ts`** — types for the renderer.
   - `AppApi` mirrors the `api` object in `index.ts`.
   - It augments the global `Window` with `electron: ElectronAPI` and `api: AppApi`.

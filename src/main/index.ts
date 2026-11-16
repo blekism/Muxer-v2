@@ -1,8 +1,10 @@
 import { app, shell, BrowserWindow, dialog, ipcMain, protocol, screen } from 'electron'
+import type { IpcMainInvokeEvent, WebContents } from 'electron'
 import { execFile } from 'node:child_process'
 import { createReadStream } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
+import { availableParallelism, constants as osConstants, setPriority } from 'node:os'
 import { join } from 'path'
 import { basename, extname } from 'node:path'
 import { Readable } from 'node:stream'
@@ -36,9 +38,14 @@ import { exportVideos, findMissingInputs, showExportedFile } from './export'
 import { MAX_FLASH_IMAGES } from '../shared/flashConstants'
 import { initFileWatch, recheckWatchedPaths, setWatchedPaths } from './fileWatch'
 import { ffmpegPath, ffprobePath } from './utils/ffpaths'
+import { createLimiter } from './utils/limit'
 import { testFFmpeg } from './utils/test-ffpaths'
 
 const runFile = promisify(execFile)
+/** ffprobe runs per imported file; capped so a 100+ file import doesn't spawn them all at once. */
+const PROBE_CONCURRENCY = Math.max(2, Math.floor(availableParallelism() / 2))
+/** Thumbnails are cosmetic and made in the background, so they get few slots (shared by every import). */
+const thumbnailLimit = createLimiter(2)
 const mediaPaths = new Map<string, string>()
 let activeExportController: AbortController | null = null
 const imageExtensions = new Set(['.jpg', '.jpeg', '.png', '.webp', '.gif'])
@@ -75,21 +82,24 @@ function sessionFilePath(): string {
   return join(app.getPath('userData'), 'editor-session.json')
 }
 
-/** Restores the last editing session with fresh media:// urls; null when there is none. */
-async function loadSession(): Promise<SavedEditorSession | null> {
+/**
+ * Restores the last editing session with fresh media:// urls; null when there is none. Thumbnails are not
+ * awaited: they arrive afterwards as `videos:thumbnail` events.
+ */
+async function loadSession(sender: WebContents): Promise<SavedEditorSession | null> {
   try {
     const saved = JSON.parse(await readFile(sessionFilePath(), 'utf8')) as SavedEditorSession
     const flashImages = Array.isArray(saved.flashImages) ? saved.flashImages : []
+    const sources: SourceVideo[] = Array.isArray(saved.sources)
+      ? saved.sources.map((source) => ({
+          ...source,
+          previewUrl: createMediaUrl(source.sourcePath),
+          thumbnailUrl: undefined
+        }))
+      : []
+    sendThumbnails(sender, sources)
     return {
-      sources: Array.isArray(saved.sources)
-        ? await Promise.all(
-            saved.sources.map(async (source) => ({
-              ...source,
-              previewUrl: createMediaUrl(source.sourcePath),
-              thumbnailUrl: await createVideoThumbnail(source.sourcePath, source.durationSec)
-            }))
-          )
-        : [],
+      sources,
       flashImages: flashImages.map((image) => ({ ...image, url: createMediaUrl(image.path) })),
       // Sessions from before selection existed flashed every image (at most MAX_FLASH_IMAGES).
       selectedFlashImageIds: Array.isArray(saved.selectedFlashImageIds)
@@ -172,7 +182,7 @@ async function createVideoThumbnail(
     if (!cached) {
       await mkdir(videoThumbsDir(), { recursive: true })
       const seekSec = Math.min(1, (durationSec || 0) * 0.1)
-      await runFile(
+      const run = runFile(
         ffmpegPath,
         [
           '-v',
@@ -192,12 +202,39 @@ async function createVideoThumbnail(
         ],
         { windowsHide: true }
       )
+      // Background work: below-normal priority keeps the UI and preview smooth while it runs.
+      if (run.child.pid) {
+        try {
+          setPriority(run.child.pid, osConstants.priority.PRIORITY_BELOW_NORMAL)
+        } catch {
+          // The process may already have exited.
+        }
+      }
+      await run
     }
     return createMediaUrl(thumbPath)
   } catch (error) {
     console.warn(`Could not create thumbnail for ${filePath}`, error)
     return undefined
   }
+}
+
+/**
+ * Makes each source's thumbnail in the background (shared, limited queue) and sends it as `videos:thumbnail`.
+ * Started on the next macrotask so the invoke reply carrying the sources reaches the renderer first.
+ */
+function sendThumbnails(sender: WebContents, sources: readonly SourceVideo[]): void {
+  setImmediate(() => {
+    for (const source of sources) {
+      void thumbnailLimit(async () => {
+        if (sender.isDestroyed()) return
+        const thumbnailUrl = await createVideoThumbnail(source.sourcePath, source.durationSec)
+        if (thumbnailUrl && !sender.isDestroyed()) {
+          sender.send('videos:thumbnail', { id: source.id, thumbnailUrl })
+        }
+      })
+    }
+  })
 }
 
 protocol.registerSchemesAsPrivileged([
@@ -252,7 +289,8 @@ async function probeVideo(filePath: string): Promise<SourceVideo> {
     name: basename(filePath),
     sourcePath: filePath,
     previewUrl: createMediaUrl(filePath),
-    thumbnailUrl: await createVideoThumbnail(filePath, durationSec, fileStats),
+    // Filled in later by a `videos:thumbnail` event (see sendThumbnails).
+    thumbnailUrl: undefined,
     sizeBytes: fileStats.size,
     durationSec,
     width: rotation ? videoStream.height : videoStream.width,
@@ -315,7 +353,7 @@ async function importMusic(): Promise<MusicTrack[]> {
   )
 }
 
-async function importVideos(): Promise<SourceVideo[]> {
+async function importVideos(event: IpcMainInvokeEvent): Promise<SourceVideo[]> {
   const result = await dialog.showOpenDialog({
     properties: ['openFile', 'multiSelections'],
     filters: [{ name: 'MP4 videos', extensions: ['mp4'] }]
@@ -326,7 +364,22 @@ async function importVideos(): Promise<SourceVideo[]> {
   const filePaths = result.filePaths.filter(
     (filePath) => extname(filePath).toLowerCase() === '.mp4'
   )
-  return Promise.all(filePaths.map(probeVideo))
+  const { sender } = event
+  const total = filePaths.length
+  let done = 0
+  const probeLimit = createLimiter(PROBE_CONCURRENCY)
+  const sources = await Promise.all(
+    filePaths.map((filePath) =>
+      probeLimit(async () => {
+        const source = await probeVideo(filePath)
+        done += 1
+        if (!sender.isDestroyed()) sender.send('videos:import-progress', { done, total })
+        return source
+      })
+    )
+  )
+  sendThumbnails(sender, sources)
+  return sources
 }
 
 function createWindow(): void {
@@ -440,7 +493,7 @@ app.whenReady().then(() => {
   ipcMain.handle('photos:choose', chooseFlashImages)
   ipcMain.handle('library:load', loadLibrary)
   ipcMain.handle('library:save', (_event, library: SavedEditorLibrary) => saveLibrary(library))
-  ipcMain.handle('session:load', loadSession)
+  ipcMain.handle('session:load', (event) => loadSession(event.sender))
   ipcMain.handle('session:save', (_event, session: SavedEditorSession) => saveSession(session))
   ipcMain.handle('music:import', importMusic)
   ipcMain.handle('export:run', async (event, request: ExportRequest): Promise<ExportOutcome> => {
